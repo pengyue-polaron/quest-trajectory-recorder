@@ -153,14 +153,16 @@ HTML = r"""<!doctype html>
       <div class="stage"><canvas id="canvas"></canvas></div>
       <aside class="side">
         <div class="card"><div class="label">latest position</div><div id="pos" class="value">--</div></div>
+        <div class="card"><div class="label">latest quaternion (xyzw)</div><div id="quat" class="value">--</div></div>
         <div class="card"><div class="label">samples / path length</div><div id="samples" class="value">0 / 0.000 m</div></div>
         <div class="card"><div class="label">stream</div><div id="stream" class="value">--</div></div>
         <div class="row">
           <button id="fit">Fit View</button>
+          <button id="poseAxes" class="secondary">Hide Pose Axes</button>
           <button id="clear" class="secondary">Clear Local View</button>
         </div>
         <div class="card small">
-          Controls: drag to rotate, wheel to zoom. Axes: X red, Y green, Z blue. The server resets this view when the pause gate opens for a new take.
+          Controls: drag to rotate, wheel to zoom. World axes and controller pose axes use X red, Y green, Z blue. The latest pose is emphasized; faint triads are sampled historical poses.
         </div>
       </aside>
     </div>
@@ -173,8 +175,10 @@ const dot = document.getElementById('dot');
 const gateText = document.getElementById('gateText');
 const statusText = document.getElementById('statusText');
 const posEl = document.getElementById('pos');
+const quatEl = document.getElementById('quat');
 const samplesEl = document.getElementById('samples');
 const streamEl = document.getElementById('stream');
+const poseAxesBtn = document.getElementById('poseAxes');
 let points = [];
 let latest = null;
 let gateOpen = false;
@@ -184,6 +188,7 @@ let lastMessage = null;
 let az = 0.72;
 let el = 0.42;
 let zoom = 1.0;
+let showPoseAxes = true;
 let dragging = false;
 let dragStart = null;
 
@@ -200,6 +205,9 @@ window.addEventListener('resize', resize);
 function distance(a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
   return Math.hypot(dx, dy, dz);
+}
+function fmt(value, digits=4) {
+  return Number.isFinite(value) ? Number(value).toFixed(digits) : '--';
 }
 function pathLength() {
   let total = 0;
@@ -229,6 +237,60 @@ function line3(a, bpt, b, color, width=1) {
   const A = project(a, b), B = project(bpt, b);
   ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(A.u, A.v); ctx.lineTo(B.u, B.v); ctx.stroke();
 }
+function quatAxes(p) {
+  let qx = Number(p.qx), qy = Number(p.qy), qz = Number(p.qz), qw = Number(p.qw);
+  const norm = Math.hypot(qx, qy, qz, qw);
+  if (!Number.isFinite(norm) || norm <= 1e-9) return null;
+  qx /= norm; qy /= norm; qz /= norm; qw /= norm;
+  const xx = qx*qx, yy = qy*qy, zz = qz*qz;
+  const xy = qx*qy, xz = qx*qz, yz = qy*qz;
+  const wx = qw*qx, wy = qw*qy, wz = qw*qz;
+  return [
+    {label:'X', color:'#c94033', dir:{x:1 - 2*(yy + zz), y:2*(xy + wz), z:2*(xz - wy)}},
+    {label:'Y', color:'#208f55', dir:{x:2*(xy - wz), y:1 - 2*(xx + zz), z:2*(yz + wx)}},
+    {label:'Z', color:'#2f5fbd', dir:{x:2*(xz + wy), y:2*(yz - wx), z:1 - 2*(xx + yy)}},
+  ];
+}
+function drawArrow3(origin, dir, b, color, axisLen, width, alpha, label) {
+  const end = {x:origin.x + dir.x * axisLen, y:origin.y + dir.y * axisLen, z:origin.z + dir.z * axisLen};
+  const A = project(origin, b), B = project(end, b);
+  const dx = B.u - A.u, dy = B.v - A.v;
+  const screenLen = Math.hypot(dx, dy);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(A.u, A.v);
+  ctx.lineTo(B.u, B.v);
+  ctx.stroke();
+  if (screenLen > 2) {
+    const angle = Math.atan2(dy, dx);
+    const head = width >= 3 ? 9 : 6;
+    ctx.beginPath();
+    ctx.moveTo(B.u, B.v);
+    ctx.lineTo(B.u - head * Math.cos(angle - Math.PI / 7), B.v - head * Math.sin(angle - Math.PI / 7));
+    ctx.lineTo(B.u - head * Math.cos(angle + Math.PI / 7), B.v - head * Math.sin(angle + Math.PI / 7));
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (label) {
+    ctx.font = '12px Menlo, monospace';
+    ctx.fillText(label, B.u + 6, B.v - 4);
+  }
+  ctx.restore();
+}
+function drawPoseAxes(p, b, emphasis=false) {
+  const axes = quatAxes(p);
+  if (!axes) return;
+  const axisLen = Math.max(0.035, Math.min(0.22, b.span * (emphasis ? 0.14 : 0.08)));
+  const width = emphasis ? 3.2 : 1.4;
+  const alpha = emphasis ? 0.95 : 0.26;
+  for (const axis of axes) {
+    drawArrow3(p, axis.dir, b, axis.color, axisLen, width, alpha, emphasis ? axis.label : null);
+  }
+}
 function draw() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -255,10 +317,15 @@ function draw() {
       ctx.beginPath(); ctx.moveTo(A.u,A.v); ctx.lineTo(B.u,B.v); ctx.stroke();
     }
   }
+  if (showPoseAxes && points.length) {
+    const stride = Math.max(1, Math.floor(points.length / 18));
+    for (let i=0; i<points.length-1; i+=stride) drawPoseAxes(points[i], b, false);
+  }
   if (points.length) {
     const S = project(points[0], b), E = project(points[points.length-1], b);
     ctx.fillStyle = '#2b9348'; ctx.beginPath(); ctx.arc(S.u,S.v,7,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = '#d9480f'; ctx.beginPath(); ctx.arc(E.u,E.v,8,0,Math.PI*2); ctx.fill();
+    if (showPoseAxes) drawPoseAxes(points[points.length-1], b, true);
   }
   ctx.fillStyle = '#657064'; ctx.font = '12px Menlo, monospace';
   ctx.fillText('X', project({x:b.xmax,y:b.ymin,z:b.zmin}, b).u + 8, project({x:b.xmax,y:b.ymin,z:b.zmin}, b).v);
@@ -269,9 +336,19 @@ function updateStats() {
   dot.classList.toggle('on', gateOpen);
   gateText.textContent = gateOpen ? 'recording / gate open' : 'waiting / paused';
   statusText.textContent = `pause=${pauseState ?? '--'} | resolution=${resolutionState ?? '--'} | last=${lastMessage ?? '--'}`;
-  if (latest) posEl.textContent = `x=${latest.x.toFixed(4)}\ny=${latest.y.toFixed(4)}\nz=${latest.z.toFixed(4)}`;
+  if (latest) {
+    posEl.textContent = `x=${fmt(latest.x)}\ny=${fmt(latest.y)}\nz=${fmt(latest.z)}`;
+    const qNorm = Math.hypot(Number(latest.qx), Number(latest.qy), Number(latest.qz), Number(latest.qw));
+    quatEl.textContent = `x=${fmt(latest.qx)}\ny=${fmt(latest.qy)}\nz=${fmt(latest.qz)}\nw=${fmt(latest.qw)}\n|q|=${fmt(qNorm, 5)}`;
+  } else {
+    posEl.textContent = '--';
+    quatEl.textContent = '--';
+  }
   samplesEl.textContent = `${points.length} / ${pathLength().toFixed(3)} m`;
   streamEl.textContent = latest ? `seq=${latest.seq}\nkind=${latest.kind}\nrecv=${latest.recv_iso}` : '--';
+}
+function updatePoseButton() {
+  poseAxesBtn.textContent = showPoseAxes ? 'Hide Pose Axes' : 'Show Pose Axes';
 }
 function handleEvent(ev) {
   if (ev.type === 'snapshot') {
@@ -310,8 +387,9 @@ window.addEventListener('mousemove', e => {
 });
 canvas.addEventListener('wheel', e => { e.preventDefault(); zoom *= Math.exp(-e.deltaY * 0.001); zoom = Math.max(.25, Math.min(6, zoom)); draw(); }, {passive:false});
 document.getElementById('fit').onclick = () => { zoom = 1; draw(); };
+poseAxesBtn.onclick = () => { showPoseAxes = !showPoseAxes; updatePoseButton(); draw(); };
 document.getElementById('clear').onclick = () => { points = []; latest = null; updateStats(); draw(); };
-resize(); setInterval(draw, 1000);
+updatePoseButton(); resize(); setInterval(draw, 1000);
 </script>
 </body>
 </html>
