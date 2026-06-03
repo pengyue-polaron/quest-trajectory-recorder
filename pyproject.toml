@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quest-trajectory-recorder"
+version = "0.1.0"
+description = "Robust receiver and plotting tools for the controller-tracking Quest APK / Quest trajectory streams."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pyzmq>=25"]
+authors = [{ name = "Pengyue" }]
+license = { text = "MIT" }
+
+[project.scripts]
+quest-receive = "quest_trajectory_recorder.receiver:main"
+quest-analyze = "quest_trajectory_recorder.analyze:main"
+quest-plot2d = "quest_trajectory_recorder.plot2d:main"
+quest-plot3d = "quest_trajectory_recorder.plot3d:main"
+quest-openteach-bridge = "quest_trajectory_recorder.openteach_bridge:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

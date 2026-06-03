@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Runtime outputs
+captures/
+plots/
+*.jsonl
+*.csv
+*.png
+*.svg
+
+# Local/device artifacts
+*.apk
+*.aab
+.DS_Store
+.env
