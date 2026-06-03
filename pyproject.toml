@@ -17,6 +17,7 @@ quest-receive = "quest_trajectory_recorder.receiver:main"
 quest-analyze = "quest_trajectory_recorder.analyze:main"
 quest-plot2d = "quest_trajectory_recorder.plot2d:main"
 quest-plot3d = "quest_trajectory_recorder.plot3d:main"
+quest-live3d = "quest_trajectory_recorder.live3d:main"
 quest-openteach-bridge = "quest_trajectory_recorder.openteach_bridge:main"
 
 [tool.setuptools.packages.find]

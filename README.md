@@ -48,6 +48,37 @@ scripts/record_once.sh
 - CSV / raw log：`captures/`
 - 2D / 3D 图：`plots/`
 
+## 实时 3D 轨迹
+
+启动实时浏览器视图：
+
+```bash
+scripts/run_live3d.sh --adb-reverse --open-browser
+```
+
+如果不想自动打开浏览器：
+
+```bash
+scripts/run_live3d.sh --adb-reverse
+```
+
+然后手动访问：
+
+```text
+http://127.0.0.1:8765/
+```
+
+操作顺序和一键录制相同：先让 Quest 应用红色/暂停，再按 `B` 变绿开始。实时脚本默认使用 `pause=Low -> High` 门控；每次门控打开会清空浏览器里的上一段轨迹，并从新 take 开始画线。脚本会同时把实时轨迹保存到 `captures/live_*_remote.csv`，除非加 `--no-record`。
+
+常用参数：
+
+```bash
+quest-live3d --help
+quest-live3d --adb-reverse --web-port 8765
+quest-live3d --no-gate
+quest-live3d --no-record
+```
+
 ## 单独运行 receiver
 
 ```bash
