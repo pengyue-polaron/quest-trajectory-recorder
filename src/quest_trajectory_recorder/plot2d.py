@@ -31,9 +31,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--png", action="store_true", help="Also convert the SVG to PNG with macOS sips.")
     parser.add_argument("--max-points", type=int, default=3000, help="Downsample long captures for SVG size.")
     parser.add_argument(
+        "--keep-origin",
         "--keep-leading-origin",
         action="store_true",
-        help="Do not drop initial exact 0,0,0 rows. By default these are treated as pre-tracking placeholders.",
+        help="Do not drop exact 0,0,0 rows. By default these are treated as tracking placeholders.",
     )
     return parser.parse_args()
 
@@ -42,7 +43,7 @@ def is_origin(row: dict[str, float | str]) -> bool:
     return abs(float(row["x"])) < 1e-8 and abs(float(row["y"])) < 1e-8 and abs(float(row["z"])) < 1e-8
 
 
-def load_positions(path: Path, max_points: int, drop_leading_origin: bool) -> tuple[list[dict[str, float | str]], int, int]:
+def load_positions(path: Path, max_points: int, drop_origin: bool) -> tuple[list[dict[str, float | str]], int, int]:
     rows: list[dict[str, float | str]] = []
     with path.open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -61,13 +62,11 @@ def load_positions(path: Path, max_points: int, drop_leading_origin: bool) -> tu
 
     total = len(rows)
     dropped = 0
-    if drop_leading_origin:
-        while dropped < len(rows) and is_origin(rows[dropped]):
-            dropped += 1
-        if 0 < dropped < len(rows):
-            rows = rows[dropped:]
-        elif dropped == len(rows):
-            dropped = 0
+    if drop_origin:
+        kept = [row for row in rows if not is_origin(row)]
+        if kept:
+            dropped = len(rows) - len(kept)
+            rows = kept
     if max_points > 0 and len(rows) > max_points:
         stride = math.ceil(len(rows) / max_points)
         rows = rows[::stride]
@@ -198,7 +197,7 @@ def main() -> int:
     args = parse_args()
     csv_path = args.csv_path or latest_remote_csv()
     csv_path = csv_path.resolve()
-    rows, total_rows, dropped = load_positions(csv_path, args.max_points, not args.keep_leading_origin)
+    rows, total_rows, dropped = load_positions(csv_path, args.max_points, not args.keep_origin)
     out_path = args.out or (PLOT_DIR / f"{csv_path.stem}.svg")
     out_path = out_path.resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)

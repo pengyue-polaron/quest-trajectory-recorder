@@ -475,7 +475,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trajectory-gate-pause", choices=("High", "Low"), default="High")
     parser.add_argument("--gate-requires-prior-pause", choices=("High", "Low"), default="Low")
     parser.add_argument("--no-gate", action="store_true", help="Accept remote frames immediately, ignoring pause state.")
-    parser.add_argument("--keep-leading-origin", action="store_true", help="Keep initial exact 0,0,0 placeholder frames.")
+    parser.add_argument(
+        "--keep-origin",
+        "--keep-leading-origin",
+        action="store_true",
+        help="Keep exact 0,0,0 placeholder frames. By default they are dropped anywhere in the stream.",
+    )
+    parser.add_argument(
+        "--max-step-m",
+        type=float,
+        default=0.20,
+        help="Reset the visible path when a single accepted step exceeds this distance; 0 disables.",
+    )
     parser.add_argument("--no-record", action="store_true", help="Do not write captures/*.csv files.")
     parser.add_argument("--adb-reverse", action="store_true", help="Run adb reverse for the Quest ports before listening.")
     parser.add_argument("--open-browser", action="store_true", help="Open the live viewer in the default browser.")
@@ -541,7 +552,7 @@ def main() -> int:
             event_writer = None
 
         accepted = 0
-        leading_origin_done = False
+        last_position: list[float] | None = None
         while not stop:
             ready = dict(poller.poll(timeout=250))
             for socket in ready:
@@ -563,7 +574,7 @@ def main() -> int:
                         state.gate_open = state.gate_prereq_seen and text == args.trajectory_gate_pause
                     if state.gate_open and not previous_gate:
                         state.reset_points()
-                        leading_origin_done = False
+                        last_position = None
                         accepted = 0
                         print(f"{recv_iso} trajectory gate opened", flush=True)
                     elif previous_gate and not state.gate_open:
@@ -583,9 +594,18 @@ def main() -> int:
                     if not state.gate_open:
                         continue
                     position = [float(value) for value in remote["position"]]
-                    if not args.keep_leading_origin and not leading_origin_done and is_origin(position):
+                    if not args.keep_origin and is_origin(position):
+                        print(f"{recv_iso} dropped exact origin placeholder frame", flush=True)
                         continue
-                    leading_origin_done = True
+                    if last_position is not None and args.max_step_m > 0:
+                        step = sum((a - b) * (a - b) for a, b in zip(position, last_position)) ** 0.5
+                        if step > args.max_step_m:
+                            state.reset_points()
+                            accepted = 0
+                            print(
+                                f"{recv_iso} trajectory path reset: step={step:.3f}m > {args.max_step_m:.3f}m",
+                                flush=True,
+                            )
 
                     event_base = {
                         "recv_unix": recv_unix,
@@ -613,6 +633,7 @@ def main() -> int:
                         "qw": remote["rotation"][3],
                     }
                     state.add_pose(point)
+                    last_position = position
                     if args.print_every and accepted % args.print_every == 0:
                         print(
                             f"{recv_iso} accepted={accepted} pos=({position[0]:.4f},{position[1]:.4f},{position[2]:.4f})",

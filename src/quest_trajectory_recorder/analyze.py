@@ -180,6 +180,7 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
             leading_origin += 1
         else:
             break
+    all_origin = sum(1 for row in rows if is_origin(row["pos"]))  # type: ignore[arg-type]
 
     work_rows = rows[leading_origin:] if drop_leading_origin else rows
     if not work_rows:
@@ -197,8 +198,20 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
     ranges = [max(vals) - min(vals) for vals in (xs, ys, zs)]
 
     path_len = 0.0
-    for a, b in zip(positions, positions[1:]):
-        path_len += norm3(sub3(b, a))  # type: ignore[arg-type]
+    steps: list[tuple[float, float, int, int, tuple[float, float, float], tuple[float, float, float]]] = []
+    for row_a, row_b, pos_a, pos_b in zip(work_rows, work_rows[1:], positions, positions[1:]):
+        step = norm3(sub3(pos_b, pos_a))  # type: ignore[arg-type]
+        path_len += step
+        steps.append(
+            (
+                step,
+                float(row_b["t"]) - float(row_a["t"]),
+                int(row_a["seq"]),
+                int(row_b["seq"]),
+                pos_a,  # type: ignore[arg-type]
+                pos_b,  # type: ignore[arg-type]
+            )
+        )
 
     displacement = sub3(positions[-1], positions[0])  # type: ignore[arg-type]
     straight = norm3(displacement)
@@ -207,7 +220,7 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
 
     print(f"CSV: {path}")
     print(f"Rows: {len(rows)} total, {len(work_rows)} analyzed")
-    print(f"Leading origin rows: {leading_origin}")
+    print(f"Origin placeholder rows: {all_origin} total, {leading_origin} leading")
     if drop_leading_origin and leading_origin:
         print("Dropped leading origin rows for motion statistics.")
     print()
@@ -234,6 +247,15 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
     print(f"  end:   x={positions[-1][0]:.6f}, y={positions[-1][1]:.6f}, z={positions[-1][2]:.6f}")  # type: ignore[index]
     print(f"  displacement: dx={displacement[0]:.6f}, dy={displacement[1]:.6f}, dz={displacement[2]:.6f}, norm={fmt_m(straight)}")
     print(f"  integrated path length: {fmt_m(path_len)}")
+    jump_candidates = [step for step in steps if step[0] > 0.10]
+    if jump_candidates:
+        print(f"  jump candidates >0.100 m: {len(jump_candidates)}")
+        for step, step_dt, seq_a, seq_b, pos_a, pos_b in sorted(jump_candidates, reverse=True)[:8]:
+            print(
+                f"    seq {seq_a}->{seq_b}: step={step:.3f} m, dt={step_dt:.4f}s, "
+                f"from=({pos_a[0]:.3f},{pos_a[1]:.3f},{pos_a[2]:.3f}) "
+                f"to=({pos_b[0]:.3f},{pos_b[1]:.3f},{pos_b[2]:.3f})"
+            )
     print()
 
     quat_norms = [quat_norm(q) for q in quats]  # type: ignore[arg-type]
