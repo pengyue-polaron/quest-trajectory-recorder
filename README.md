@@ -104,8 +104,9 @@ PYTHONPATH=src python -m quest_trajectory_recorder.receiver --help
 
 ```bash
 quest-analyze --drop-leading-origin captures/test_remote.csv
-quest-plot2d captures/test_remote.csv --out plots/test_remote.svg --png
-quest-plot3d captures/test_remote.csv --out plots/test_remote_3d.svg --png
+quest-clean captures/test_remote.csv --max-step-m 0.20
+quest-plot2d captures/test_remote_cleaned.csv --out plots/test_remote.svg --png
+quest-plot3d captures/test_remote_cleaned.csv --out plots/test_remote_3d.svg --png
 ```
 
 PNG 转换在 macOS 上使用 `sips`；Linux/Codespaces 没有 `sips` 时会保留 SVG。
