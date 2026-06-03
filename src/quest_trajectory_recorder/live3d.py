@@ -66,15 +66,17 @@ HTML = r"""<!doctype html>
   <title>Quest Trajectory Live 3D</title>
   <style>
     :root {
-      --ink: #162018;
-      --muted: #657064;
-      --paper: #f7f1df;
-      --panel: #fffaf0;
-      --accent: #0b7285;
-      --green: #2b9348;
-      --red: #d9480f;
-      --blue: #2f5fbd;
-      --grid: #d9cfb7;
+      --ink: #18211c;
+      --muted: #6d756b;
+      --line: #d8d0bf;
+      --paper: #f5efe3;
+      --panel: rgba(255, 252, 244, .92);
+      --panel-strong: #fffaf0;
+      --green: #238447;
+      --red: #c8402b;
+      --blue: #2d61bd;
+      --amber: #b7791f;
+      --shadow: 0 18px 45px rgba(38, 31, 20, .12);
     }
     * { box-sizing: border-box; }
     body {
@@ -82,57 +84,84 @@ HTML = r"""<!doctype html>
       min-height: 100vh;
       color: var(--ink);
       background:
-        radial-gradient(circle at 15% 10%, rgba(255, 200, 87, .35), transparent 28rem),
-        radial-gradient(circle at 85% 20%, rgba(70, 143, 175, .25), transparent 26rem),
-        linear-gradient(135deg, #f6ecd4 0%, #eef2e4 100%);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        linear-gradient(90deg, rgba(24,33,28,.045) 1px, transparent 1px) 0 0 / 36px 36px,
+        linear-gradient(rgba(24,33,28,.035) 1px, transparent 1px) 0 0 / 36px 36px,
+        radial-gradient(circle at 20% 12%, rgba(183,121,31,.18), transparent 26rem),
+        linear-gradient(145deg, #f7f1e5 0%, #eef1e9 100%);
+      font-family: "Avenir Next", "Gill Sans", ui-sans-serif, sans-serif;
     }
-    .wrap { width: min(1280px, calc(100vw - 28px)); margin: 18px auto; }
-    header { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
-    h1 { margin: 0; font-family: Georgia, serif; font-size: clamp(28px, 4vw, 52px); line-height: .95; letter-spacing: -.04em; }
-    .subtitle { color: var(--muted); margin-top: 8px; font-size: 13px; max-width: 760px; }
+    .wrap { width: min(1360px, calc(100vw - 32px)); margin: 16px auto; }
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+    h1 { margin: 0; font-size: clamp(26px, 3.2vw, 42px); line-height: 1; letter-spacing: -.04em; }
+    .eyebrow { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
     .status {
-      min-width: 260px;
-      padding: 14px 16px;
-      border: 1.5px solid rgba(22, 32, 24, .85);
+      min-width: 330px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
       border-radius: 18px;
-      background: rgba(255, 250, 240, .86);
-      box-shadow: 0 12px 28px rgba(20, 30, 22, .12);
+      background: var(--panel);
+      box-shadow: var(--shadow);
     }
-    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(22,32,24,.35); background: white; font-size: 12px; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 4px rgba(217,72,15,.15); }
-    .dot.on { background: var(--green); box-shadow: 0 0 0 4px rgba(43,147,72,.18); }
-    .grid { display: grid; grid-template-columns: 1fr 330px; gap: 14px; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 5px rgba(200,64,43,.12); }
+    .dot.on { background: var(--green); box-shadow: 0 0 0 5px rgba(35,132,71,.14); }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; }
     .stage, .side {
-      border: 1.5px solid rgba(22, 32, 24, .9);
-      border-radius: 26px;
-      background: rgba(255, 250, 240, .78);
-      box-shadow: 0 18px 42px rgba(20, 30, 22, .14);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
       overflow: hidden;
     }
-    canvas { display: block; width: 100%; height: min(72vh, 760px); min-height: 520px; }
-    .side { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-    .card { padding: 12px; border-radius: 16px; background: rgba(255,255,255,.62); border: 1px solid rgba(22,32,24,.14); }
-    .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-    .value { font-size: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .stage-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,250,240,.72);
+    }
+    .stage-title { font-size: 14px; font-weight: 800; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 12px; }
+    .swatch { display: inline-flex; align-items: center; gap: 5px; }
+    .swatch::before { content: ""; width: 10px; height: 3px; border-radius: 999px; background: currentColor; }
+    .x { color: var(--red); } .y { color: var(--green); } .z { color: var(--blue); } .start { color: var(--green); } .end { color: var(--red); }
+    canvas { display: block; width: 100%; height: min(72vh, 760px); min-height: 540px; }
+    .side { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .panel-title { margin: 0; font-size: 13px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
+    .card { padding: 12px; border-radius: 16px; background: var(--panel-strong); border: 1px solid rgba(24,33,28,.10); }
+    .label { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+    .value { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 15px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .primary-stat { font-size: 20px; font-weight: 800; }
     .small { font-size: 12px; color: var(--muted); line-height: 1.45; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     button {
       appearance: none;
-      border: 1.5px solid rgba(22,32,24,.8);
-      background: #162018;
+      border: 1px solid rgba(24,33,28,.72);
+      background: var(--ink);
       color: #fffaf0;
-      border-radius: 14px;
-      padding: 10px 12px;
+      border-radius: 13px;
+      padding: 10px 11px;
       font: inherit;
+      font-size: 13px;
+      font-weight: 800;
       cursor: pointer;
     }
     button.secondary { background: #fffaf0; color: var(--ink); }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    #clear { grid-column: 1 / -1; }
     @media (max-width: 980px) {
-      header, .grid { display: block; }
-      .status { margin-top: 12px; }
-      .side { margin-top: 14px; }
+      .wrap { width: min(100vw - 20px, 760px); margin: 10px auto; }
+      header, .layout { grid-template-columns: 1fr; }
+      .status { min-width: 0; }
       canvas { min-height: 420px; height: 58vh; }
+      .stage-head { align-items: flex-start; flex-direction: column; }
     }
   </style>
 </head>
@@ -140,29 +169,43 @@ HTML = r"""<!doctype html>
   <div class="wrap">
     <header>
       <div>
-        <h1>Quest Trajectory<br/>Live 3D</h1>
-        <div class="subtitle">Live local view from the Quest controller pose stream. Green means the trajectory gate is open; red means waiting/paused. Arrival time is local receive time, not device sample time.</div>
+        <p class="eyebrow">Quest trajectory</p>
+        <h1>Live 3D Tracker</h1>
       </div>
       <div class="status">
         <span class="pill"><span id="dot" class="dot"></span><span id="gateText">connecting</span></span>
-        <div class="small" id="statusText" style="margin-top:10px">Waiting for server events...</div>
+        <div class="small" id="statusText" style="margin-top:8px">Waiting for server events...</div>
       </div>
     </header>
 
-    <div class="grid">
-      <div class="stage"><canvas id="canvas"></canvas></div>
+    <div class="layout">
+      <section class="stage">
+        <div class="stage-head">
+          <div class="stage-title">Trajectory View</div>
+          <div class="legend">
+            <span class="swatch x">X</span>
+            <span class="swatch y">Y</span>
+            <span class="swatch z">Z</span>
+            <span class="swatch start">start</span>
+            <span class="swatch end">latest</span>
+          </div>
+        </div>
+        <canvas id="canvas"></canvas>
+      </section>
+
       <aside class="side">
-        <div class="card"><div class="label">latest position</div><div id="pos" class="value">--</div></div>
-        <div class="card"><div class="label">latest quaternion (xyzw)</div><div id="quat" class="value">--</div></div>
-        <div class="card"><div class="label">samples / path length</div><div id="samples" class="value">0 / 0.000 m</div></div>
-        <div class="card"><div class="label">stream</div><div id="stream" class="value">--</div></div>
-        <div class="row">
+        <p class="panel-title">Live Data</p>
+        <div class="card"><div class="label">Samples / Path</div><div id="samples" class="value primary-stat">0 / 0.000 m</div></div>
+        <div class="card"><div class="label">Position</div><div id="pos" class="value">--</div></div>
+        <div class="card"><div class="label">Quaternion (xyzw)</div><div id="quat" class="value">--</div></div>
+        <div class="card"><div class="label">Stream</div><div id="stream" class="value">--</div></div>
+        <div class="actions">
           <button id="fit">Fit View</button>
           <button id="poseAxes" class="secondary">Hide Pose Axes</button>
           <button id="clear" class="secondary">Clear Local View</button>
         </div>
         <div class="card small">
-          Controls: drag to rotate, wheel to zoom. World axes and controller pose axes use X red, Y green, Z blue. The latest pose is emphasized; faint triads are sampled historical poses.
+          Drag to rotate. Wheel to zoom. Pose arrows show the controller's local X/Y/Z axes; the bold triad is the latest pose.
         </div>
       </aside>
     </div>
@@ -323,18 +366,18 @@ function draw() {
   }
   if (points.length) {
     const S = project(points[0], b), E = project(points[points.length-1], b);
-    ctx.fillStyle = '#2b9348'; ctx.beginPath(); ctx.arc(S.u,S.v,7,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#d9480f'; ctx.beginPath(); ctx.arc(E.u,E.v,8,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#238447'; ctx.beginPath(); ctx.arc(S.u,S.v,7,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#c8402b'; ctx.beginPath(); ctx.arc(E.u,E.v,8,0,Math.PI*2); ctx.fill();
     if (showPoseAxes) drawPoseAxes(points[points.length-1], b, true);
   }
-  ctx.fillStyle = '#657064'; ctx.font = '12px Menlo, monospace';
+  ctx.fillStyle = '#6d756b'; ctx.font = '12px Menlo, monospace';
   ctx.fillText('X', project({x:b.xmax,y:b.ymin,z:b.zmin}, b).u + 8, project({x:b.xmax,y:b.ymin,z:b.zmin}, b).v);
   ctx.fillText('Y', project({x:b.xmin,y:b.ymax,z:b.zmin}, b).u + 8, project({x:b.xmin,y:b.ymax,z:b.zmin}, b).v);
   ctx.fillText('Z', project({x:b.xmin,y:b.ymin,z:b.zmax}, b).u + 8, project({x:b.xmin,y:b.ymin,z:b.zmax}, b).v);
 }
 function updateStats() {
   dot.classList.toggle('on', gateOpen);
-  gateText.textContent = gateOpen ? 'recording / gate open' : 'waiting / paused';
+  gateText.textContent = gateOpen ? 'recording' : 'paused';
   statusText.textContent = `pause=${pauseState ?? '--'} | resolution=${resolutionState ?? '--'} | last=${lastMessage ?? '--'}`;
   if (latest) {
     posEl.textContent = `x=${fmt(latest.x)}\ny=${fmt(latest.y)}\nz=${fmt(latest.z)}`;
