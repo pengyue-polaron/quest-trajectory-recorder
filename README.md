@@ -11,6 +11,40 @@
 - 轨迹端口：`8125`。
 - 状态端口：`8095` resolution，`8100` pause/continue。
 
+## 连接方式
+
+### ADB reverse（推荐调试）
+
+Quest 端 IP 填 `127.0.0.1`，本机脚本加 `--adb-reverse` 或使用默认 `scripts/record_once.sh`。优点是稳定，不受路由器/AP isolation 影响。
+
+### 局域网无线
+
+Quest 端 IP 填这台 Mac 的局域网 IP，例如：
+
+```bash
+ipconfig getifaddr en0
+```
+
+实时 3D：
+
+```bash
+scripts/run_live3d.sh --open-browser
+```
+
+录制一次：
+
+```bash
+scripts/record_once.sh --lan
+```
+
+无线模式要求：
+
+- Quest 和 Mac 在同一个 Wi-Fi/局域网。
+- Quest app 里的 IP 是 Mac 的 LAN IP，不是 `127.0.0.1`。
+- macOS Firewall 允许 Python/Terminal 接收入站连接。
+- 路由器没有开启 AP isolation / client isolation。
+- 端口 `8125`、`8095`、`8100` 没被占用或拦截。
+
 ## 安装
 
 ```bash
