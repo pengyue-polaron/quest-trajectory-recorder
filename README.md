@@ -1,126 +1,228 @@
 # Quest Trajectory Recorder
 
-鲁棒接收 Quest 控制器追踪应用发出的右手控制器轨迹，并输出 CSV、2D SVG/PNG、3D SVG/PNG 和校验报告。
+A lightweight receiver and visualization toolkit for Quest controller trajectory streams. The recorder listens to the Quest application's ZMQ outputs, saves pose data to CSV/JSONL, and provides offline plots and a live 3D browser view.
 
-这个项目是 Open-Teach 风格的轻量接收端：保留 Quest APK 的 ZMQ PUSH 输入，同时把 controller tracking 变体的 `8125` 文本协议整理成可分析的数据。
+## Supported Quest Application
 
-## 适用场景
+This repository is intended for the controller-tracking Quest application installed as:
 
-- Quest 端应用：Open-Teach 风格的 controller-tracking APK。
-- Quest 端 IP：推荐填 `127.0.0.1`，本地用 `adb reverse` 转发端口。
-- 轨迹端口：`8125`。
-- 状态端口：`8095` resolution，`8100` pause/continue。
+- Android package: `com.Xigbee.FrankaBot`
+- Application/build name: `FrankaBotControllerTracking`
 
-## 连接方式
+The upstream Open-Teach project provides Quest APKs under `VR/APK` and refers to:
 
-### ADB reverse（推荐调试）
+- `SingleHandArm-APK` for single-arm / hand teleoperation.
+- `Bimanual-APK` for bimanual and LIBERO-style teleoperation.
 
-Quest 端 IP 填 `127.0.0.1`，本机脚本加 `--adb-reverse` 或使用默认 `scripts/record_once.sh`。优点是稳定，不受路由器/AP isolation 影响。
+Those Open-Teach APKs stream hand keypoints on the original Open-Teach ports. This repository focuses on the controller-tracking variant, whose primary trajectory stream is the `8125` controller pose stream.
 
-### 局域网无线
+## What Is Recorded
 
-Quest 端 IP 填这台 Mac 的局域网 IP，例如：
+A recording captures:
 
-```bash
-ipconfig getifaddr en0
-```
+- Right controller position in Quest / Unity world coordinates.
+- Right controller orientation as an `xyzw` quaternion.
+- Three auxiliary orientation endpoints included by the Quest app.
+- Pause / recording gate state.
+- Resolution state.
+- Raw inbound frames for later re-parsing.
 
-实时 3D：
+The recorder uses the host receive time (`recv_unix`, `recv_iso`). The Quest application does not include a device-side sample timestamp in the observed controller pose stream.
 
-```bash
-scripts/run_live3d.sh --open-browser
-```
+## Ports
 
-录制一次：
+| Port | Direction | Purpose |
+| --- | --- | --- |
+| `8125` | Quest -> host | Controller pose stream |
+| `8095` | Quest -> host | Resolution state (`High` / `Low`) |
+| `8100` | Quest -> host | Pause / recording gate state (`High` / `Low`) |
+| `8087` | Quest -> host | Open-Teach hand keypoints, if using a hand-keypoint APK |
+| `8089` | host -> local subscribers | Open-Teach-style transformed frame, produced by the optional bridge |
+| `8093` | host -> local subscribers | Open-Teach-style resolution topic, produced by the optional bridge |
+| `8102` | host -> local subscribers | Open-Teach-style pause topic, produced by the optional bridge |
 
-```bash
-scripts/record_once.sh --lan
-```
-
-无线模式要求：
-
-- Quest 和 Mac 在同一个 Wi-Fi/局域网。
-- Quest app 里的 IP 是 Mac 的 LAN IP，不是 `127.0.0.1`。
-- macOS Firewall 允许 Python/Terminal 接收入站连接。
-- 路由器没有开启 AP isolation / client isolation。
-- 端口 `8125`、`8095`、`8100` 没被占用或拦截。
-
-## 安装
+## Installation
 
 ```bash
+cd ~/Codespace/quest-trajectory-recorder
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-也可以直接运行：
+Alternatively:
 
 ```bash
+cd ~/Codespace/quest-trajectory-recorder
 scripts/setup.sh
 source .venv/bin/activate
 ```
 
-还需要本机能运行 `adb`，并且 Quest 已开启 USB debugging。
+For ADB reverse mode, install Android platform tools and enable USB debugging on the Quest headset.
 
-## 一键录制
+## Connection Modes
+
+### ADB Reverse
+
+This is the most reliable mode for local recording and debugging.
+
+1. In the Quest application, set the IP address to `127.0.0.1`.
+2. Connect the Quest headset over USB with debugging enabled.
+3. Run the recorder with `--adb-reverse`, or use the default `scripts/record_once.sh` mode.
+
+The helper script configures reverse forwarding for the required ports.
+
+### LAN / Wi-Fi
+
+Use this mode when the Quest application should send data directly over the local network.
+
+1. Find the host machine's LAN IP:
+
+   ```bash
+   ipconfig getifaddr en0
+   ```
+
+2. Set the Quest application's IP address to that LAN IP, not `127.0.0.1`.
+3. Make sure the Quest and host machine are on the same network.
+4. Allow incoming Python / Terminal connections in the host firewall if prompted.
+
+Run LAN mode with:
 
 ```bash
+scripts/record_once.sh --lan
+```
+
+or:
+
+```bash
+scripts/run_live3d.sh --open-browser
+```
+
+## Recording a Take
+
+For the default ADB reverse workflow:
+
+```bash
+cd ~/Codespace/quest-trajectory-recorder
+source .venv/bin/activate
 scripts/record_once.sh
 ```
 
-操作顺序：
+Recommended recording sequence:
 
-1. Quest 应用里的 IP 设置为 `127.0.0.1`。
-2. 确保应用先处于红色/暂停状态；如果已经绿色，先按一次右手控制器 `B` 变红。
-3. 运行 `scripts/record_once.sh`。
-4. 按 `B` 变绿开始录制，移动右手控制器。
-5. 再按 `B` 变红停止；脚本会自动结束并生成结果。
+1. Open the Quest application.
+2. Set the Quest application IP to `127.0.0.1` for ADB reverse mode, or to the host LAN IP for Wi-Fi mode.
+3. Ensure the app is paused / red. If it is already green, press the right controller `B` button once to make it red.
+4. Start the recording script.
+5. Press `B` once to switch to green and begin recording.
+6. Move the right controller.
+7. Press `B` again to switch back to red and stop the take.
 
-输出位置：
+The script stops automatically after the pause state is stable and no new trajectory frames arrive.
 
-- CSV / raw log：`captures/`
-- 2D / 3D 图：`plots/`
+## Live 3D Viewer
 
-## 实时 3D 轨迹
-
-启动实时浏览器视图：
+Start the live viewer in ADB reverse mode:
 
 ```bash
+cd ~/Codespace/quest-trajectory-recorder
+source .venv/bin/activate
 scripts/run_live3d.sh --adb-reverse --open-browser
 ```
 
-如果不想自动打开浏览器：
+Start the live viewer in LAN mode:
 
 ```bash
-scripts/run_live3d.sh --adb-reverse
+scripts/run_live3d.sh --open-browser
 ```
 
-然后手动访问：
+If the browser is not opened automatically, visit:
 
 ```text
 http://127.0.0.1:8765/
 ```
 
-操作顺序和一键录制相同：先让 Quest 应用红色/暂停，再按 `B` 变绿开始。实时脚本默认使用 `pause=Low -> High` 门控；每次门控打开会清空浏览器里的上一段轨迹，并从新 take 开始画线。脚本会同时把实时轨迹保存到 `captures/live_*_remote.csv`，除非加 `--no-record`。
+The viewer shows:
 
-实时视图会同时显示姿态：
+- The live 3D trajectory.
+- Start and latest points.
+- Controller orientation axes derived from the quaternion.
+- Current sample count and path length.
+- Latest position, quaternion, stream sequence, and gate state.
 
-- 当前 controller 姿态用加粗三轴箭头显示。
-- 历史姿态会按轨迹长度抽样，用较淡的三轴箭头显示，避免画面太乱。
-- 颜色约定：局部 `X` 红色、局部 `Y` 绿色、局部 `Z` 蓝色，四元数顺序为 `x,y,z,w`。
-- 侧边栏会显示最新四元数和 `|q|`，正常情况下应接近 `1.0`。
+Controls:
 
-常用参数：
+- Drag to rotate the 3D view.
+- Use the mouse wheel to zoom.
+- Use `Fit View` to reset zoom.
+- Use `Hide Pose Axes` / `Show Pose Axes` to toggle orientation arrows.
+- Use `Clear Local View` to clear only the browser's local display.
 
-```bash
-quest-live3d --help
-quest-live3d --adb-reverse --web-port 8765
-quest-live3d --no-gate
-quest-live3d --no-record
+The live viewer also writes `captures/live_*_remote.csv` unless started with `--no-record`.
+
+## Output Files
+
+For a session named `<session>`, outputs are written to:
+
+```text
+captures/<session>_remote.csv
+captures/<session>_events.csv
+captures/<session>_raw.jsonl
+plots/<session>_remote.svg
+plots/<session>_remote_3d.svg
 ```
 
-## 单独运行 receiver
+If `sips` is available on macOS, PNG versions of the plots are also generated.
+
+### Remote CSV
+
+`captures/<session>_remote.csv` contains one row per accepted controller pose frame:
+
+| Column | Description |
+| --- | --- |
+| `recv_unix`, `recv_iso` | Host receive time |
+| `seq` | Receiver sequence number |
+| `channel`, `port` | Source channel and port |
+| `kind` | `absolute` or `relative` |
+| `pos_x`, `pos_y`, `pos_z` | Controller position |
+| `quat_x`, `quat_y`, `quat_z`, `quat_w` | Controller orientation quaternion in `xyzw` order |
+| `flag` | Boolean flag included by the Quest app |
+| `point0_*`, `point1_*`, `point2_*` | Auxiliary orientation endpoints |
+| `raw_text` | Original text frame |
+
+### Events CSV
+
+`captures/<session>_events.csv` stores non-trajectory status frames, including pause and resolution state changes.
+
+### Raw JSONL
+
+`captures/<session>_raw.jsonl` stores every inbound frame with base64 payload and decoded text where possible. This file is useful for auditing and re-parsing captures.
+
+## Analysis and Plotting
+
+Analyze a recording:
+
+```bash
+quest-analyze --drop-leading-origin captures/<session>_remote.csv
+```
+
+Clean placeholder and jump artifacts:
+
+```bash
+quest-clean captures/<session>_remote.csv --max-step-m 0.20
+```
+
+Generate plots manually:
+
+```bash
+quest-plot2d captures/<session>_remote.csv --out plots/<session>_remote.svg --png
+quest-plot3d captures/<session>_remote.csv --out plots/<session>_remote_3d.svg --png
+```
+
+## Receiver CLI
+
+The one-shot script wraps the lower-level receiver. To run the receiver directly:
 
 ```bash
 quest-receive \
@@ -135,69 +237,48 @@ quest-receive \
   --stop-idle-sec 2.0
 ```
 
-如果没有安装 console scripts，也可以：
+Without installing console scripts:
 
 ```bash
 PYTHONPATH=src python -m quest_trajectory_recorder.receiver --help
 ```
 
-## 分析和画图
+## Open-Teach Bridge
 
-```bash
-quest-analyze --drop-leading-origin captures/test_remote.csv
-quest-clean captures/test_remote.csv --max-step-m 0.20
-quest-plot2d captures/test_remote_cleaned.csv --out plots/test_remote.svg --png
-quest-plot3d captures/test_remote_cleaned.csv --out plots/test_remote_3d.svg --png
-```
-
-PNG 转换在 macOS 上使用 `sips`；Linux/Codespaces 没有 `sips` 时会保留 SVG。
-
-## Open-Teach bridge
-
-如果想尽量复用 Open-Teach 的 PUB/SUB 数据流，可以运行：
+The optional bridge republishes the controller-tracking stream as Open-Teach-style PUB/SUB topics:
 
 ```bash
 quest-openteach-bridge --conflate
 ```
 
-它会把：
+It maps:
 
-- APK `8125` controller pose 转成 `8089 / transformed_hand_frame`。
-- APK `8095` resolution 转成 `8093 / button`。
-- APK `8100` pause 转成 `8102 / pause`。
+| Input | Output |
+| --- | --- |
+| `8125` controller pose | `8089`, topic `transformed_hand_frame` |
+| `8095` resolution state | `8093`, topic `button` |
+| `8100` pause state | `8102`, topic `pause` |
 
-注意：这个 bridge 适合实时控制风格；完整轨迹录制请用 `scripts/record_once.sh` 或 `quest-receive`，不要用 `--conflate`。
+The bridge is intended for live Open-Teach-style consumers. For complete trajectory capture, use `scripts/record_once.sh`, `scripts/run_live3d.sh`, or `quest-receive`.
 
-## 协议摘要
+## Controller Pose Protocol
 
-controller-tracking Quest APK 的主要轨迹帧格式是：
+The controller-tracking Quest application sends pose frames as UTF-8 text:
 
 ```text
 absolute|pos_x,pos_y,pos_z|quat_x,quat_y,quat_z,quat_w|flag|point0_x,point0_y,point0_z|point1_x,point1_y,point1_z|point2_x,point2_y,point2_z
 ```
 
-字段含义：
+Observed auxiliary endpoint mapping:
 
-- `pos_*`：右手控制器/跟踪器在 Quest/Unity world space 下的位置，单位约为米。
-- `quat_*`：姿态四元数，顺序为 `x,y,z,w`。
-- `point0..2`：辅助轴端点，实测长度约 `0.1 m`。
+- `point1` is approximately `+local X`.
+- `point2` is approximately `-local Y`.
+- `point0` is approximately `-local Z`.
 
-实测辅助轴关系：
+The viewer and Open-Teach bridge primarily use the quaternion for orientation; the auxiliary points are retained in the CSV for validation.
 
-- `point1 ~= +quat X`
-- `point2 ~= -quat Y`
-- `point0 ~= -quat Z`
+## References
 
-## 鲁棒性策略
-
-- **门控录制**：默认需要先看到 `pause=Low`，再看到 `pause=High`，才写入轨迹；避免旧的排队帧混入新录制。
-- **原始日志保留**：所有帧都会写入 `*_raw.jsonl`，即使解析失败也能追溯。
-- **开头原点过滤**：分析和绘图默认忽略开头精确 `0,0,0` 的占位帧。
-- **时间戳说明**：CSV 的 `recv_unix` 是本机接收时间，不是 Quest 设备采样时间；可用于排序，不适合计算精确速度/加速度。
-
-## 参考
-
-- Open-Teach repo: https://github.com/aadhithya14/Open-Teach
-- Open-Teach network config: https://raw.githubusercontent.com/aadhithya14/Open-Teach/main/configs/network.yaml
-- Open-Teach ZMQ helpers: https://raw.githubusercontent.com/aadhithya14/Open-Teach/main/openteach/utils/network.py
-- Open-Teach keypoint transform: https://raw.githubusercontent.com/aadhithya14/Open-Teach/main/openteach/components/detector/keypoint_transform.py
+- Open-Teach: https://github.com/aadhithya14/Open-Teach
+- Open-Teach network configuration: https://github.com/aadhithya14/Open-Teach/blob/main/configs/network.yaml
+- Open-Teach VR documentation: https://github.com/aadhithya14/Open-Teach/blob/main/docs/vr.md
