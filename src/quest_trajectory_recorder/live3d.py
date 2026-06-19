@@ -56,6 +56,7 @@ REMOTE_FIELDS = [
     "raw_text",
 ]
 EVENT_FIELDS = ["recv_unix", "recv_iso", "seq", "channel", "port", "text", "bytes"]
+DEFAULT_GRIPPER_PORT = 8127
 
 
 HTML = r"""<!doctype html>
@@ -110,10 +111,24 @@ HTML = r"""<!doctype html>
     .section-title:first-child { margin-top: 0; }
     .card { padding: 10px; border-radius: 7px; background: #fff; border: 1px solid var(--line); }
     .card.subtle { background: #fafafa; }
+    .card.compact { padding: 8px 10px; }
     .label { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 6px; }
     .value { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .large { font-size: 18px; font-weight: 600; font-family: inherit; }
+    .large { font-size: 16px; font-weight: 600; font-family: inherit; }
     .small { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .button-status { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .status-tile { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fafafa; }
+    .status-tile .name { color: var(--muted); font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+    .status-tile .state { font-size: 20px; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; }
+    .status-tile.trigger-on { background: #111; border-color: #111; color: #fff; }
+    .status-tile.trigger-on .name { color: #ddd; }
+    .details { border: 1px solid var(--line); border-radius: 7px; background: #fff; overflow: hidden; }
+    .details summary { cursor: pointer; padding: 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; list-style-position: inside; }
+    .details[open] summary { border-bottom: 1px solid var(--line); color: var(--ink); background: #fafafa; }
+    .raw-grid { display: grid; gap: 6px; padding: 8px; }
+    .raw-grid .card { padding: 7px 8px; }
+    .raw-grid .label { margin-bottom: 3px; font-size: 11px; }
+    .raw-grid .value { font-size: 11px; line-height: 1.4; }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     button {
       appearance: none;
@@ -194,11 +209,17 @@ HTML = r"""<!doctype html>
         </div>
 
         <p class="section-title">Live data</p>
-        <div class="card"><div class="label">Samples / path</div><div id="samples" class="value large">0 / 0.000 m</div></div>
-        <div class="card"><div class="label">Teleop position [right, forward, up]</div><div id="teleopPos" class="value">--</div></div>
-        <div class="card"><div class="label">Raw Quest position [x, y, z]</div><div id="rawPos" class="value">--</div></div>
-        <div class="card"><div class="label">Quaternion (xyzw)</div><div id="quat" class="value">--</div></div>
-        <div class="card"><div class="label">Stream</div><div id="stream" class="value">--</div></div>
+        <div class="card compact"><div class="label">Samples / path</div><div id="samples" class="value large">0 / 0.000 m</div></div>
+        <div class="card compact"><div class="label">Controller</div><div id="buttons">--</div></div>
+        <details class="details">
+          <summary>Raw numbers</summary>
+          <div class="raw-grid">
+            <div class="card"><div class="label">Teleop position [right, forward, up]</div><div id="teleopPos" class="value">--</div></div>
+            <div class="card"><div class="label">Raw Quest position [x, y, z]</div><div id="rawPos" class="value">--</div></div>
+            <div class="card"><div class="label">Quaternion (xyzw)</div><div id="quat" class="value">--</div></div>
+            <div class="card"><div class="label">Stream</div><div id="stream" class="value">--</div></div>
+          </div>
+        </details>
         <div class="actions">
           <button id="fit">Fit view</button>
           <button id="poseAxes">Hide pose axes</button>
@@ -217,6 +238,7 @@ const gateText = document.getElementById('gateText');
 const statusText = document.getElementById('statusText');
 const samplesEl = document.getElementById('samples');
 const teleopPosEl = document.getElementById('teleopPos');
+const buttonsEl = document.getElementById('buttons');
 const rawPosEl = document.getElementById('rawPos');
 const quatEl = document.getElementById('quat');
 const streamEl = document.getElementById('stream');
@@ -235,6 +257,8 @@ let latest = null;
 let gateOpen = false;
 let pauseState = null;
 let resolutionState = null;
+let gripperState = null;
+let gripperCount = 0;
 let lastMessage = null;
 let az = 0.72;
 let el = 0.42;
@@ -449,8 +473,14 @@ function updateCalibrationStatus(message=null) {
 function updateStats() {
   dot.classList.toggle('on', gateOpen);
   gateText.textContent = gateOpen ? 'streaming' : 'paused';
-  statusText.textContent = `pause=${pauseState ?? '--'} / resolution=${resolutionState ?? '--'} / last=${lastMessage ?? '--'}`;
+  statusText.textContent = `stream=${pauseState ?? '--'} / last=${lastMessage ?? '--'}`;
   samplesEl.textContent = `${points.length} / ${pathLength().toFixed(3)} m`;
+  const triggerValue = latestRaw ? (latestRaw.flag ? 'True' : 'False') : '--';
+  const triggerClass = latestRaw && latestRaw.flag ? 'trigger-on' : 'trigger-off';
+  buttonsEl.innerHTML = `<div class="button-status">
+    <div class="status-tile"><div class="name">Stream</div><div class="state">${pauseState ?? '--'}</div></div>
+    <div class="status-tile ${triggerClass}"><div class="name">Trigger</div><div class="state">${triggerValue}</div></div>
+  </div>`;
   if (latest && latestRaw) {
     teleopPosEl.textContent = `right=${fmt(latest.teleop.x)}\nforward=${fmt(latest.teleop.y)}\nup=${fmt(latest.teleop.z)}`;
     rawPosEl.textContent = `x=${fmt(latestRaw.x)}\ny=${fmt(latestRaw.y)}\nz=${fmt(latestRaw.z)}`;
@@ -466,12 +496,14 @@ function handleEvent(ev) {
   if (ev.type === 'snapshot') {
     rawPoints = (ev.points || []).map(clonePoint);
     gateOpen = !!ev.gate_open; pauseState = ev.pause_state; resolutionState = ev.resolution_state;
+    gripperState = ev.gripper_state; gripperCount = ev.gripper_count || 0;
   } else if (ev.type === 'reset') {
     rawPoints = [];
   } else if (ev.type === 'pose') {
     rawPoints.push(clonePoint(ev.point));
   } else if (ev.type === 'status') {
     gateOpen = !!ev.gate_open; pauseState = ev.pause_state; resolutionState = ev.resolution_state;
+    gripperState = ev.gripper_state; gripperCount = ev.gripper_count || gripperCount;
   }
   lastMessage = ev.recv_iso || new Date().toLocaleTimeString();
   refreshDisplayPoints(); updateStats(); draw();
@@ -543,6 +575,8 @@ class LiveState:
         self.gate_open = False
         self.pause_state: str | None = None
         self.resolution_state: str | None = None
+        self.gripper_state: str | None = None
+        self.gripper_count = 0
         self.gate_prereq_seen = False
         self.seq = 0
         self.total_received = 0
@@ -558,6 +592,8 @@ class LiveState:
                 "gate_open": self.gate_open,
                 "pause_state": self.pause_state,
                 "resolution_state": self.resolution_state,
+                "gripper_state": self.gripper_state,
+                "gripper_count": self.gripper_count,
                 "total_received": self.total_received,
                 "total_written": self.total_written,
                 "uptime_sec": time.time() - self.started_at,
@@ -588,18 +624,29 @@ class LiveState:
                 except queue.Empty:
                     pass
 
-    def set_status(self, *, pause_state: str | None = None, resolution_state: str | None = None) -> None:
+    def set_status(
+        self,
+        *,
+        pause_state: str | None = None,
+        resolution_state: str | None = None,
+        gripper_state: str | None = None,
+    ) -> None:
         with self.lock:
             if pause_state is not None:
                 self.pause_state = pause_state
             if resolution_state is not None:
                 self.resolution_state = resolution_state
+            if gripper_state is not None:
+                self.gripper_state = gripper_state
+                self.gripper_count += 1
             event = {
                 "type": "status",
                 "recv_iso": iso_now(),
                 "gate_open": self.gate_open,
                 "pause_state": self.pause_state,
                 "resolution_state": self.resolution_state,
+                "gripper_state": self.gripper_state,
+                "gripper_count": self.gripper_count,
             }
         self.broadcast(event)
 
@@ -682,6 +729,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
     parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
     parser.add_argument("--pause-port", type=int, default=DEFAULT_PORTS["pause"])
+    parser.add_argument("--gripper-port", type=int, default=DEFAULT_GRIPPER_PORT)
     parser.add_argument("--web-host", default="127.0.0.1")
     parser.add_argument("--web-port", type=int, default=8765)
     parser.add_argument("--out-dir", type=Path, default=Path("captures"))
@@ -712,7 +760,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.adb_reverse:
-        setup_adb_reverse([args.remote_port, args.resolution_port, args.pause_port])
+        setup_adb_reverse([args.remote_port, args.resolution_port, args.pause_port, args.gripper_port])
 
     state = LiveState(max_points=max(10, args.max_points))
     state.gate_open = bool(args.no_gate)
@@ -733,7 +781,12 @@ def main() -> int:
     context: zmq.Context[zmq.Socket] = zmq.Context()
     poller = zmq.Poller()
     sockets: dict[zmq.Socket, tuple[str, int]] = {}
-    for channel, port in {"remote": args.remote_port, "resolution": args.resolution_port, "pause": args.pause_port}.items():
+    for channel, port in {
+        "remote": args.remote_port,
+        "resolution": args.resolution_port,
+        "pause": args.pause_port,
+        "gripper": args.gripper_port,
+    }.items():
         socket = make_socket(context, args.host, port, zmq.PULL)
         poller.register(socket, zmq.POLLIN)
         sockets[socket] = (channel, port)
@@ -798,6 +851,9 @@ def main() -> int:
                     state.set_status(pause_state=text)
                 elif channel == "resolution":
                     state.set_status(resolution_state=text)
+                elif channel == "gripper":
+                    state.set_status(gripper_state=text)
+                    print(f"{recv_iso} gripper event: {text!r}", flush=True)
                 elif channel == "remote":
                     state.total_received += 1
                     try:
@@ -847,6 +903,7 @@ def main() -> int:
                         "qy": remote["rotation"][1],
                         "qz": remote["rotation"][2],
                         "qw": remote["rotation"][3],
+                        "flag": remote["flag"],
                     }
                     state.add_pose(point)
                     last_position = position

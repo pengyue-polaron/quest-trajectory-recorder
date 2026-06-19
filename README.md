@@ -34,6 +34,7 @@ The recorder uses the host receive time (`recv_unix`, `recv_iso`). The Quest app
 | Port | Direction | Purpose |
 | --- | --- | --- |
 | `8125` | Quest -> host | Controller pose stream |
+| `8127` | Quest -> host | Franka gripper trigger events, when emitted by the APK |
 | `8095` | Quest -> host | Resolution state (`High` / `Low`) |
 | `8100` | Quest -> host | Pause / recording gate state (`High` / `Low`) |
 | `8087` | Quest -> host | Open-Teach hand keypoints, if using a hand-keypoint APK |
@@ -165,6 +166,9 @@ The viewer shows:
   - Quest gravity defines up; right and forward are orthogonalized from your motions.
 - Current sample count and path length.
 - Latest position, quaternion, stream sequence, and gate state.
+- Controller status channels: B/stream pause on `8100`, resolution on `8095`,
+  the controller pose `flag` field on `8125` used by the recovered APK for the
+  trigger/gripper state, and `8127` gripper events if another APK emits them.
 
 Controls:
 

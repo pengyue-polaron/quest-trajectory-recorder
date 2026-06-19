@@ -7,6 +7,7 @@ APK="${APK:-${HOME}/Codespace/openteach_controller_apk/FrankaRemoteTrackingV2.ap
 INSTALL=1
 LAUNCH=1
 IP="127.0.0.1"
+CLOSE_PANELS=1
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,9 +27,13 @@ while [[ $# -gt 0 ]]; do
       LAUNCH=0
       shift
       ;;
+    --keep-panels)
+      CLOSE_PANELS=0
+      shift
+      ;;
     -h|--help)
       cat <<'HELP'
-Usage: scripts/start_frankabot.sh [--apk APK] [--ip 127.0.0.1] [--no-install] [--no-launch]
+Usage: scripts/start_frankabot.sh [--apk APK] [--ip 127.0.0.1] [--no-install] [--no-launch] [--keep-panels]
 
 Installs/configures the FrankaBotControllerTracking APK, sets Unity PlayerPrefs
 IP to 127.0.0.1 for ADB reverse mode, forwards ZMQ ports, and launches the app.
@@ -92,6 +97,13 @@ adb shell am broadcast -a com.oculus.vrpowermanager.prox_close >/dev/null 2>&1 |
 if [[ "${LAUNCH}" -eq 1 ]]; then
   echo "Launching ${PACKAGE}..."
   adb shell am start -n "${PACKAGE}/${ACTIVITY}" --es unity "-force-gles" | tr -d '\r'
+  if [[ "${CLOSE_PANELS}" -eq 1 ]]; then
+    echo "Closing Oculus panel overlays and refocusing ${PACKAGE}..."
+    adb shell am force-stop com.oculus.panelapp.library >/dev/null 2>&1 || true
+    adb shell am force-stop com.oculus.store >/dev/null 2>&1 || true
+    sleep 1
+    adb shell am start -n "${PACKAGE}/${ACTIVITY}" --es unity "-force-gles" >/dev/null
+  fi
 fi
 
 echo

@@ -7,6 +7,7 @@ The observed controller-tracking Quest APK uses NetMQ PUSH sockets. The receiver
 | Channel | Port | Payload |
 | --- | ---: | --- |
 | remote/controller pose | 8125 | `absolute|pos|quat|flag|point0|point1|point2` |
+| gripper trigger | 8127 | APK-dependent text event for Franka gripper toggle |
 | resolution | 8095 | `High`, `Low`, or `None` |
 | pause/continue | 8100 | `High`, `Low`, or `None` |
 | original hand keypoints | 8087 | Open-Teach hand keypoint variant, not the controller pose variant |
@@ -23,7 +24,7 @@ Parsed output columns:
 
 - `pos_x,pos_y,pos_z`
 - `quat_x,quat_y,quat_z,quat_w`
-- `flag`
+- `flag` (`True` while the recovered FrankaBot APK reports the trigger/gripper state)
 - up to three auxiliary `pointN_x,pointN_y,pointN_z`
 
 ## Timing limitation
