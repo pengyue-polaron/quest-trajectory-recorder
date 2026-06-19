@@ -8,6 +8,7 @@ import csv
 import datetime as dt
 import json
 import queue
+import re
 import signal
 import subprocess
 import threading
@@ -17,7 +18,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import zmq
 
@@ -57,6 +58,7 @@ REMOTE_FIELDS = [
 ]
 EVENT_FIELDS = ["recv_unix", "recv_iso", "seq", "channel", "port", "text", "bytes"]
 DEFAULT_GRIPPER_PORT = 8127
+DEFAULT_CALIBRATION_PATH = Path("calibrations/quest_teleop_frame.json")
 
 
 HTML = r"""<!doctype html>
@@ -130,6 +132,19 @@ HTML = r"""<!doctype html>
     .raw-grid .label { margin-bottom: 3px; font-size: 11px; }
     .raw-grid .value { font-size: 11px; line-height: 1.4; }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .profile-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; }
+    .profile-row.wide { grid-template-columns: 1fr; }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font: inherit;
+      font-size: 13px;
+    }
+    input:focus, select:focus { outline: 2px solid #111; outline-offset: 1px; }
     button {
       appearance: none;
       border: 1px solid var(--line-strong);
@@ -152,6 +167,7 @@ HTML = r"""<!doctype html>
     .step { padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fafafa; color: var(--muted); }
     .step.active { border-color: #111; color: #111; background: #fff; }
     .step.done { color: #111; }
+    .profile-hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
     @media (max-width: 980px) {
       .wrap { width: min(100vw - 20px, 760px); margin: 10px auto; }
       header, .layout { display: grid; grid-template-columns: 1fr; }
@@ -190,22 +206,55 @@ HTML = r"""<!doctype html>
       </section>
 
       <aside class="side">
+        <p class="section-title">Profile</p>
+        <div class="card subtle">
+          <div class="profile-row">
+            <select id="profileSelect" aria-label="Saved calibration profiles"></select>
+            <input id="profileName" value="libero_default" spellcheck="false" aria-label="Calibration profile name" />
+          </div>
+          <div class="profile-row" style="margin-top:8px;">
+            <button id="loadProfile">Load profile</button>
+            <button id="saveProfile" class="primary" disabled>Save profile</button>
+          </div>
+          <div id="profileStatus" class="profile-hint" style="margin-top:8px;">Loading profiles...</div>
+        </div>
+
         <p class="section-title">Calibration</p>
         <div class="steps">
-          <div id="stepOrigin" class="step active">1. Hold the controller at neutral, then click <b>Start calibration</b>.</div>
-          <div id="stepRight" class="step">2. Move the controller to your right and click <b>Save right direction</b>.</div>
-          <div id="stepForward" class="step">3. Move the controller forward and click <b>Save forward direction</b>.</div>
+          <div id="stepRight" class="step active">1. Capture a start point, move the controller to your right, then save <b>right</b>.</div>
+          <div id="stepForward" class="step">2. Capture a start point, move forward, then save <b>forward</b>.</div>
+          <div id="stepOrigin" class="step">3. Hold the controller at the neutral teleop origin, then save <b>origin</b>.</div>
         </div>
         <div class="actions">
-          <button id="startCalibration" class="primary">Start calibration</button>
-          <button id="saveRight" disabled>Save right direction</button>
-          <button id="saveForward" disabled>Save forward direction</button>
-          <button id="resetCalib">Reset calibration</button>
+          <button id="calibNext" class="primary">Start right sample</button>
+          <button id="resetCalib">Restart calibration</button>
           <button id="clear" class="full">Clear path</button>
         </div>
         <div id="calibCard" class="card subtle">
           <div class="label">Frame status</div>
           <div id="calibStatus" class="value">No calibration yet.</div>
+        </div>
+
+        <p class="section-title">Rotation</p>
+        <div class="card subtle">
+          <div class="small">After position calibration, hold the controller in your neutral gripper pose, then save rotation. The gripper arrow should point down in the neutral pose.</div>
+          <div class="profile-row" style="margin-top:8px;">
+            <select id="gripperAxis" aria-label="Controller gripper arrow axis">
+              <option value="-z">controller -Z as gripper arrow</option>
+              <option value="+z">controller +Z as gripper arrow</option>
+              <option value="+x">controller +X as gripper arrow</option>
+              <option value="-x">controller -X as gripper arrow</option>
+              <option value="+y">controller +Y as gripper arrow</option>
+              <option value="-y">controller -Y as gripper arrow</option>
+            </select>
+            <button id="saveGripperAxis" disabled>Save arrow axis</button>
+          </div>
+          <div class="actions" style="margin-top:8px;">
+            <button id="rotationMode">Show rotation view</button>
+            <button id="saveRotation" disabled>Save neutral rotation</button>
+            <button id="clearRotation" disabled>Clear rotation</button>
+          </div>
+          <div id="rotationStatus" class="value" style="margin-top:8px;">Position calibration required first.</div>
         </div>
 
         <p class="section-title">Live data</p>
@@ -222,7 +271,7 @@ HTML = r"""<!doctype html>
         </details>
         <div class="actions">
           <button id="fit">Fit view</button>
-          <button id="poseAxes">Hide pose axes</button>
+          <button id="poseAxes">Show pose axes</button>
         </div>
         <div class="card subtle small">Drag to rotate. Wheel to zoom. Numeric teleop frame is [right, forward, up]. In the 3D view, forward is drawn into the scene (-Z) so right cross forward = up.</div>
       </aside>
@@ -230,7 +279,7 @@ HTML = r"""<!doctype html>
   </div>
 
 <script>
-const CALIBRATION_VERSION = 4;
+const CALIBRATION_VERSION = 5;
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const dot = document.getElementById('dot');
@@ -246,9 +295,18 @@ const calibStatus = document.getElementById('calibStatus');
 const stepOrigin = document.getElementById('stepOrigin');
 const stepRight = document.getElementById('stepRight');
 const stepForward = document.getElementById('stepForward');
-const startCalibrationBtn = document.getElementById('startCalibration');
-const saveRightBtn = document.getElementById('saveRight');
-const saveForwardBtn = document.getElementById('saveForward');
+const calibNextBtn = document.getElementById('calibNext');
+const profileSelect = document.getElementById('profileSelect');
+const profileNameInput = document.getElementById('profileName');
+const loadProfileBtn = document.getElementById('loadProfile');
+const saveProfileBtn = document.getElementById('saveProfile');
+const profileStatus = document.getElementById('profileStatus');
+const rotationModeBtn = document.getElementById('rotationMode');
+const saveRotationBtn = document.getElementById('saveRotation');
+const clearRotationBtn = document.getElementById('clearRotation');
+const gripperAxisSelect = document.getElementById('gripperAxis');
+const saveGripperAxisBtn = document.getElementById('saveGripperAxis');
+const rotationStatus = document.getElementById('rotationStatus');
 const poseAxesBtn = document.getElementById('poseAxes');
 let rawPoints = [];
 let points = [];
@@ -263,12 +321,16 @@ let lastMessage = null;
 let az = 0.72;
 let el = 0.42;
 let zoom = 1.0;
-let showPoseAxes = true;
+let showPoseAxes = false;
+let viewMode = 'path';
 let dragging = false;
 let dragStart = null;
 const QUEST_UP = {x:0, y:1, z:0};
+const STANDARD_GRIPPER_DOWN = {x:0, y:0, z:-1};
 const MIN_RIGHT_M = 0.05;
-let calibration = loadCalibration();
+let currentProfile = 'libero_default';
+let profileInitialized = false;
+let calibration = null;
 
 function vec(x=0, y=0, z=0) { return {x:Number(x), y:Number(y), z:Number(z)}; }
 function add(a,b) { return vec(a.x+b.x, a.y+b.y, a.z+b.z); }
@@ -281,17 +343,67 @@ function normalize(a) { const n = norm(a); return n > 1e-9 ? mul(a, 1/n) : vec()
 function fmt(value, digits=4) { return Number.isFinite(value) ? Number(value).toFixed(digits) : '--'; }
 function clonePoint(p) { return {...p}; }
 function rawVec(p) { return vec(p.x, p.y, p.z); }
+function profileKey() { return `questTeleopCalibration:${currentProfile}`; }
+function hasRightStart() { return calibration && calibration.rightStart; }
+function hasRight() { return calibration && calibration.right; }
+function hasForwardStart() { return calibration && calibration.forwardStart; }
+function hasForward() { return calibration && calibration.forward; }
 function hasOrigin() { return calibration && calibration.origin; }
-function hasRight() { return hasOrigin() && calibration.right; }
 function isCalibrated() { return calibration && calibration.origin && calibration.right && calibration.forward && calibration.up && calibration.version === CALIBRATION_VERSION; }
-function saveCalibration() { localStorage.setItem('questTeleopCalibration', JSON.stringify(calibration)); }
-function loadCalibration() {
+function hasRotationNeutral() { return isCalibrated() && calibration.rotation && calibration.rotation.neutralQuat; }
+function gripperAxisName() { return (calibration && calibration.rotation && calibration.rotation.gripperAxis) || gripperAxisSelect.value || '-z'; }
+function axisVec(name) {
+  const sign = name[0] === '-' ? -1 : 1;
+  const axis = name.slice(1);
+  if (axis === 'x') return vec(sign,0,0);
+  if (axis === 'y') return vec(0,sign,0);
+  return vec(0,0,sign);
+}
+function sanitizeProfileName(name) {
+  const cleaned = String(name || '').replace(/\.json$/i, '').replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^_+|_+$/g, '');
+  return cleaned || 'libero_default';
+}
+function localSaveCalibration() {
+  if (!calibration) return;
+  localStorage.setItem(profileKey(), JSON.stringify(calibration));
+}
+function loadLocalCalibration(profile=currentProfile) {
   try {
-    const parsed = JSON.parse(localStorage.getItem('questTeleopCalibration') || 'null');
+    const parsed = JSON.parse(localStorage.getItem(`questTeleopCalibration:${profile}`) || 'null');
     if (!parsed || parsed.version !== CALIBRATION_VERSION) return null;
-    if (!parsed.origin) return null;
     return parsed;
   } catch (_) { return null; }
+}
+function applyCalibration(data, profile=currentProfile, status='') {
+  calibration = data && data.version === CALIBRATION_VERSION ? data : null;
+  currentProfile = sanitizeProfileName(profile);
+  profileNameInput.value = currentProfile;
+  gripperAxisSelect.value = gripperAxisName();
+  if (calibration) localSaveCalibration();
+  refreshDisplayPoints(); updateStats(); draw();
+  if (status) profileStatus.textContent = status;
+}
+function saveServerCalibration() {
+  if (!isCalibrated()) {
+    updateCalibrationStatus('Finish right, forward, then origin before saving a profile.');
+    return Promise.resolve(false);
+  }
+  currentProfile = sanitizeProfileName(profileNameInput.value);
+  calibration.profile = currentProfile;
+  calibration.savedAt = new Date().toISOString();
+  localSaveCalibration();
+  return fetch(`/calibration?profile=${encodeURIComponent(currentProfile)}`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(calibration),
+  }).then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    profileStatus.textContent = `Saved profile: ${currentProfile}`;
+    return loadProfiles().then(() => true);
+  }).catch(err => {
+    profileStatus.textContent = `Save failed: ${err.message}`;
+    return false;
+  });
 }
 function rawToDisplay(p) {
   const out = clonePoint(p);
@@ -316,15 +428,118 @@ function directionToDisplay(dir) {
   if (!isCalibrated()) return vec(dir.x, dir.y, -dir.z);
   return vec(dot3(dir, calibration.right), dot3(dir, calibration.up), -dot3(dir, calibration.forward));
 }
+function directionToTeleop(dir) {
+  if (!isCalibrated()) return vec(dir.x, dir.z, dir.y);
+  return vec(dot3(dir, calibration.right), dot3(dir, calibration.forward), dot3(dir, calibration.up));
+}
+function rawQuat(p) {
+  return {x:Number(p.qx), y:Number(p.qy), z:Number(p.qz), w:Number(p.qw)};
+}
+function pointFromQuat(q) {
+  return {qx:q.x, qy:q.y, qz:q.z, qw:q.w};
+}
+function quatNormalize(q) {
+  const n = Math.hypot(q.x, q.y, q.z, q.w);
+  return n > 1e-9 ? {x:q.x/n, y:q.y/n, z:q.z/n, w:q.w/n} : {x:0, y:0, z:0, w:1};
+}
+function quatConj(q) {
+  return {x:-q.x, y:-q.y, z:-q.z, w:q.w};
+}
+function quatMul(a, b) {
+  return {
+    x: a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+    y: a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+    z: a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+    w: a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+  };
+}
+function quatDeltaDeg(a, b) {
+  const rel = quatNormalize(quatMul(quatConj(quatNormalize(a)), quatNormalize(b)));
+  const w = Math.max(-1, Math.min(1, Math.abs(rel.w)));
+  return 2 * Math.acos(w) * 180 / Math.PI;
+}
+function quatMatrixColumns(p) {
+  let qx = Number(p.qx), qy = Number(p.qy), qz = Number(p.qz), qw = Number(p.qw);
+  const n = Math.hypot(qx, qy, qz, qw);
+  if (!Number.isFinite(n) || n <= 1e-9) return null;
+  qx /= n; qy /= n; qz /= n; qw /= n;
+  const xx=qx*qx, yy=qy*qy, zz=qz*qz, xy=qx*qy, xz=qx*qz, yz=qy*qz, wx=qw*qx, wy=qw*qy, wz=qw*qz;
+  return [
+    vec(1 - 2*(yy + zz), 2*(xy + wz), 2*(xz - wy)),
+    vec(2*(xy - wz), 1 - 2*(xx + zz), 2*(yz + wx)),
+    vec(2*(xz + wy), 2*(yz - wx), 1 - 2*(xx + yy))
+  ];
+}
+function quatAxesTeleop(p) {
+  const cols = quatMatrixColumns(p); if (!cols) return null;
+  return [
+    {label:'X', color:'#d44c47', dir:directionToTeleop(cols[0])},
+    {label:'Y', color:'#448361', dir:directionToTeleop(cols[1])},
+    {label:'Z', color:'#337ea9', dir:directionToTeleop(cols[2])}
+  ];
+}
+function teleopToDisplayDir(dir) {
+  return vec(dir.x, dir.z, -dir.y);
+}
+function teleopRotationMatrix(p) {
+  const axes = quatAxesTeleop(p); if (!axes) return null;
+  return [
+    [axes[0].dir.x, axes[1].dir.x, axes[2].dir.x],
+    [axes[0].dir.y, axes[1].dir.y, axes[2].dir.y],
+    [axes[0].dir.z, axes[1].dir.z, axes[2].dir.z]
+  ];
+}
+function matTranspose(a) {
+  return [[a[0][0],a[1][0],a[2][0]],[a[0][1],a[1][1],a[2][1]],[a[0][2],a[1][2],a[2][2]]];
+}
+function matMul(a, b) {
+  const out = [[0,0,0],[0,0,0],[0,0,0]];
+  for (let r=0; r<3; r++) for (let c=0; c<3; c++) out[r][c] = a[r][0]*b[0][c] + a[r][1]*b[1][c] + a[r][2]*b[2][c];
+  return out;
+}
+function matrixAxesTeleop(m) {
+  return [
+    {label:'X', color:'#d44c47', dir:vec(m[0][0], m[1][0], m[2][0])},
+    {label:'Y', color:'#448361', dir:vec(m[0][1], m[1][1], m[2][1])},
+    {label:'Z', color:'#337ea9', dir:vec(m[0][2], m[1][2], m[2][2])}
+  ];
+}
+function matVec(m, v) {
+  return vec(
+    m[0][0]*v.x + m[0][1]*v.y + m[0][2]*v.z,
+    m[1][0]*v.x + m[1][1]*v.y + m[1][2]*v.z,
+    m[2][0]*v.x + m[2][1]*v.y + m[2][2]*v.z
+  );
+}
+function relativeRotationMatrixTeleop() {
+  if (!hasRotationNeutral() || !latestRaw) return null;
+  const neutral = teleopRotationMatrix(pointFromQuat(calibration.rotation.neutralQuat));
+  const current = teleopRotationMatrix(latestRaw);
+  if (!neutral || !current) return null;
+  return matMul(current, matTranspose(neutral));
+}
+function relativeRotationAxesTeleop() {
+  const rel = relativeRotationMatrixTeleop();
+  return rel ? matrixAxesTeleop(rel) : null;
+}
+function relativeGripperDirTeleop() {
+  const rel = relativeRotationMatrixTeleop();
+  return rel ? matVec(rel, STANDARD_GRIPPER_DOWN) : currentPhysicalGripperDirTeleop();
+}
+function currentPhysicalGripperDirTeleop() {
+  const current = latestRaw ? teleopRotationMatrix(latestRaw) : null;
+  const local = axisVec(gripperAxisName());
+  return current ? matVec(current, local) : local;
+}
 function currentRightMotion() {
-  if (!hasOrigin() || !latestRaw) return null;
-  const rawDelta = sub(rawVec(latestRaw), calibration.origin);
+  if (!hasRightStart() || !latestRaw) return null;
+  const rawDelta = sub(rawVec(latestRaw), calibration.rightStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   return {horizontal, length:norm(horizontal)};
 }
 function currentForwardMotion() {
-  if (!hasRight() || !latestRaw) return null;
-  const rawDelta = sub(rawVec(latestRaw), calibration.origin);
+  if (!hasRight() || !hasForwardStart() || !latestRaw) return null;
+  const rawDelta = sub(rawVec(latestRaw), calibration.forwardStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const orthogonal = sub(horizontal, mul(calibration.right, dot3(horizontal, calibration.right)));
   return {orthogonal, length:norm(orthogonal)};
@@ -371,15 +586,11 @@ function line3(a, bpt, b, color, width=1, alpha=1) {
   ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(A.u, A.v); ctx.lineTo(B.u, B.v); ctx.stroke(); ctx.restore();
 }
 function quatAxes(p) {
-  let qx = Number(p.qx), qy = Number(p.qy), qz = Number(p.qz), qw = Number(p.qw);
-  const n = Math.hypot(qx, qy, qz, qw);
-  if (!Number.isFinite(n) || n <= 1e-9) return null;
-  qx /= n; qy /= n; qz /= n; qw /= n;
-  const xx=qx*qx, yy=qy*qy, zz=qz*qz, xy=qx*qy, xz=qx*qz, yz=qy*qz, wx=qw*qx, wy=qw*qy, wz=qw*qz;
+  const cols = quatMatrixColumns(p); if (!cols) return null;
   return [
-    {label:'X', color:'#d44c47', dir:directionToDisplay(vec(1 - 2*(yy + zz), 2*(xy + wz), 2*(xz - wy)))},
-    {label:'Y', color:'#448361', dir:directionToDisplay(vec(2*(xy - wz), 1 - 2*(xx + zz), 2*(yz + wx)))},
-    {label:'Z', color:'#337ea9', dir:directionToDisplay(vec(2*(xz + wy), 2*(yz - wx), 1 - 2*(xx + yy)))}
+    {label:'X', color:'#d44c47', dir:directionToDisplay(cols[0])},
+    {label:'Y', color:'#448361', dir:directionToDisplay(cols[1])},
+    {label:'Z', color:'#337ea9', dir:directionToDisplay(cols[2])}
   ];
 }
 function drawArrow3(origin, dir, b, color, axisLen, width, alpha, label) {
@@ -418,8 +629,46 @@ function drawWorldAxes(b) {
   drawArrow3(origin, vec(0,0,-1), b, '#448361', axisLen, 2.5, .9, 'forward');
   drawArrow3(origin, vec(0,1,0), b, '#337ea9', axisLen, 2.5, .9, 'up');
 }
+function drawOrientationAxesFromPoint(p, b, origin, axisLen, width, alpha, labelPrefix='') {
+  const axes = quatAxes(p); if (!axes) return;
+  for (const axis of axes) drawArrow3(origin, axis.dir, b, axis.color, axisLen, width, alpha, `${labelPrefix}${axis.label}`);
+}
+function drawTeleopAxes(axes, b, origin, axisLen, width, alpha, labelPrefix='') {
+  if (!axes) return;
+  for (const axis of axes) drawArrow3(origin, teleopToDisplayDir(axis.dir), b, axis.color, axisLen, width, alpha, `${labelPrefix}${axis.label}`);
+}
+function drawRotationView() {
+  const rect = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, rect.width, rect.height);
+  const b = {xmin:-1,xmax:1,ymin:-1,ymax:1,zmin:-1,zmax:1,cx:0,cy:0,cz:0,span:2.2};
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  drawWorldAxes(b);
+  const axisLen = 0.72;
+  drawArrow3(vec(0,0,0), teleopToDisplayDir(STANDARD_GRIPPER_DOWN), b, '#111111', axisLen * 0.78, 2.0, 0.30, 'standard gripper down');
+  if (hasRotationNeutral() && latestRaw) {
+    drawTeleopAxes(relativeRotationAxesTeleop(), b, vec(0,0,0), axisLen, 4.0, 0.92, 'rel ');
+    drawArrow3(vec(0,0,0), teleopToDisplayDir(relativeGripperDirTeleop()), b, '#111111', axisLen * 0.95, 5.0, 0.95, 'gripper');
+  } else if (latestRaw) {
+    drawTeleopAxes(quatAxesTeleop(latestRaw), b, vec(0,0,0), axisLen, 3.0, 0.75, 'abs ');
+    drawArrow3(vec(0,0,0), teleopToDisplayDir(currentPhysicalGripperDirTeleop()), b, '#111111', axisLen * 0.95, 5.0, 0.75, 'gripper');
+  }
+  ctx.save();
+  ctx.fillStyle = '#111';
+  ctx.font = '13px Helvetica Neue, Helvetica, Arial, sans-serif';
+  ctx.fillText('Rotation view: current controller relative to saved neutral', 14, 24);
+  ctx.fillStyle = '#666';
+  ctx.fillText('After Save neutral rotation, the black gripper arrow should overlap standard gripper down.', 14, 44);
+  if (hasRotationNeutral() && latestRaw) {
+    ctx.fillText(`delta from neutral: ${fmt(quatDeltaDeg(calibration.rotation.neutralQuat, rawQuat(latestRaw)), 1)} deg`, 14, 64);
+  } else {
+    ctx.fillText('No neutral saved yet: showing absolute controller axes.', 14, 64);
+  }
+  ctx.restore();
+}
 function draw() {
   const rect = canvas.getBoundingClientRect();
+  if (viewMode === 'rotation') { drawRotationView(); return; }
   ctx.clearRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, rect.width, rect.height);
   const b = bounds();
@@ -451,24 +700,58 @@ function updateCalibrationStatus(message=null) {
   const forwardMotion = currentForwardMotion();
   const rightMotionText = rightMotion ? `${fmt(rightMotion.length,3)} m horizontal movement` : '--';
   const forwardMotionText = forwardMotion ? `${fmt(forwardMotion.length,3)} m forward movement` : '--';
-  stepOrigin.classList.toggle('done', hasOrigin());
-  stepOrigin.classList.toggle('active', !hasOrigin());
-  stepRight.classList.toggle('active', hasOrigin() && !hasRight());
   stepRight.classList.toggle('done', hasRight());
-  stepForward.classList.toggle('active', hasRight() && !isCalibrated());
-  stepForward.classList.toggle('done', isCalibrated());
-  saveRightBtn.disabled = !hasOrigin();
-  saveForwardBtn.disabled = !hasRight();
+  stepRight.classList.toggle('active', !hasRight());
+  stepForward.classList.toggle('done', hasForward());
+  stepForward.classList.toggle('active', hasRight() && !hasForward());
+  stepOrigin.classList.toggle('done', isCalibrated());
+  stepOrigin.classList.toggle('active', hasForward() && !hasOrigin());
+  saveProfileBtn.disabled = !isCalibrated();
+  calibNextBtn.disabled = !latestRaw && !isCalibrated();
+  if (!hasRightStart()) calibNextBtn.textContent = 'Start right sample';
+  else if (!hasRight()) calibNextBtn.textContent = 'Save right';
+  else if (!hasForwardStart()) calibNextBtn.textContent = 'Start forward sample';
+  else if (!hasForward()) calibNextBtn.textContent = 'Save forward';
+  else if (!hasOrigin()) calibNextBtn.textContent = 'Save origin';
+  else calibNextBtn.textContent = 'Start new calibration';
   if (message) { calibStatus.textContent = message; return; }
   if (isCalibrated()) {
-    calibStatus.textContent = `Ready\nright=[${fmt(calibration.right.x,3)}, ${fmt(calibration.right.y,3)}, ${fmt(calibration.right.z,3)}]\nforward=[${fmt(calibration.forward.x,3)}, ${fmt(calibration.forward.y,3)}, ${fmt(calibration.forward.z,3)}]\nup=[0.000, 1.000, 0.000]`;
+    calibStatus.textContent = `Ready: ${currentProfile}\nright=[${fmt(calibration.right.x,3)}, ${fmt(calibration.right.y,3)}, ${fmt(calibration.right.z,3)}]\nforward=[${fmt(calibration.forward.x,3)}, ${fmt(calibration.forward.y,3)}, ${fmt(calibration.forward.z,3)}]\norigin=[${fmt(calibration.origin.x,3)}, ${fmt(calibration.origin.y,3)}, ${fmt(calibration.origin.z,3)}]`;
+  } else if (hasForward()) {
+    calibStatus.textContent = 'Right and forward are set. Hold the controller at the neutral teleop origin and click Save origin.';
+  } else if (hasForwardStart()) {
+    calibStatus.textContent = `Move forward and hold.\nCurrent ${forwardMotionText}\nNeed at least ${fmt(MIN_RIGHT_M,2)} m.`;
   } else if (hasRight()) {
-    calibStatus.textContent = `Right saved. Move forward and hold.\nCurrent ${forwardMotionText}\nNeed at least ${fmt(MIN_RIGHT_M,2)} m.`;
-  } else if (hasOrigin()) {
-    calibStatus.textContent = `Origin saved. Move to your right and hold.\nCurrent ${rightMotionText}\nNeed at least ${fmt(MIN_RIGHT_M,2)} m.`;
+    calibStatus.textContent = 'Right saved. Click Start forward sample from any comfortable point, then move forward.';
+  } else if (hasRightStart()) {
+    calibStatus.textContent = `Move to your right and hold.\nCurrent ${rightMotionText}\nNeed at least ${fmt(MIN_RIGHT_M,2)} m.`;
   } else {
-    calibStatus.textContent = latestRaw ? 'Ready to start. Hold neutral and click Start calibration.' : 'Start Quest streaming first, then calibrate.';
+    calibStatus.textContent = latestRaw ? 'Click Start right sample, move right, then Save right.' : 'Start Quest streaming first, then calibrate.';
   }
+}
+function updateRotationStatus(message=null) {
+  saveRotationBtn.disabled = !isCalibrated() || !latestRaw;
+  clearRotationBtn.disabled = !hasRotationNeutral();
+  saveGripperAxisBtn.disabled = !isCalibrated();
+  rotationModeBtn.textContent = viewMode === 'rotation' ? 'Show path view' : 'Show rotation view';
+  gripperAxisSelect.value = gripperAxisName();
+  if (message) { rotationStatus.textContent = message; return; }
+  if (!isCalibrated()) {
+    rotationStatus.textContent = 'Finish position calibration first.';
+    return;
+  }
+  if (!latestRaw) {
+    rotationStatus.textContent = 'Waiting for controller pose.';
+    return;
+  }
+  const axes = hasRotationNeutral() ? relativeRotationAxesTeleop() : quatAxesTeleop(latestRaw);
+  const axisLabel = hasRotationNeutral() ? 'relative axes' : 'absolute axes';
+  const axisText = axes ? axes.map(a => `${a.label}=[${fmt(a.dir.x,2)}, ${fmt(a.dir.y,2)}, ${fmt(a.dir.z,2)}]`).join('\n') : '--';
+  const grip = hasRotationNeutral() ? relativeGripperDirTeleop() : currentPhysicalGripperDirTeleop();
+  const gripText = `gripper arrow(${gripperAxisName()})=[${fmt(grip.x,2)}, ${fmt(grip.y,2)}, ${fmt(grip.z,2)}] target=[0.00, 0.00, -1.00]`;
+  const delta = hasRotationNeutral() ? `\ndelta from neutral=${fmt(quatDeltaDeg(calibration.rotation.neutralQuat, rawQuat(latestRaw)), 1)} deg` : '';
+  const neutral = hasRotationNeutral() ? `Neutral saved: ${calibration.rotation.capturedAt || 'yes'}` : 'No neutral rotation saved yet.';
+  rotationStatus.textContent = `${neutral}${delta}\n${gripText}\ncurrent ${axisLabel} in [right, forward, up]:\n${axisText}`;
 }
 function updateStats() {
   dot.classList.toggle('on', gateOpen);
@@ -491,6 +774,7 @@ function updateStats() {
     teleopPosEl.textContent = '--'; rawPosEl.textContent = '--'; quatEl.textContent = '--'; streamEl.textContent = '--';
   }
   updateCalibrationStatus();
+  updateRotationStatus();
 }
 function handleEvent(ev) {
   if (ev.type === 'snapshot') {
@@ -512,40 +796,122 @@ function requireLatest() {
   if (!latestRaw) { updateCalibrationStatus('No controller sample yet. Start streaming first.'); return null; }
   return rawVec(latestRaw);
 }
-startCalibrationBtn.onclick = () => {
+function beginCalibration() {
+  currentProfile = sanitizeProfileName(profileNameInput.value);
   const p = requireLatest(); if (!p) return;
-  calibration = {version:CALIBRATION_VERSION, origin:p, up:QUEST_UP, state:'awaiting_right', createdAt:new Date().toISOString()};
-  saveCalibration(); refreshDisplayPoints(); updateStats(); draw();
-};
-saveRightBtn.onclick = () => {
+  calibration = {version:CALIBRATION_VERSION, profile:currentProfile, rightStart:p, up:QUEST_UP, state:'right_started', createdAt:new Date().toISOString()};
+  localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+}
+function saveRightDirection() {
   const p = requireLatest(); if (!p) return;
-  if (!hasOrigin()) { updateCalibrationStatus('Click Start calibration first.'); return; }
-  const rawDelta = sub(p, calibration.origin);
+  if (!hasRightStart()) { updateCalibrationStatus('Click Start right sample first.'); return; }
+  const rawDelta = sub(p, calibration.rightStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const length = norm(horizontal);
   if (length < MIN_RIGHT_M) { updateCalibrationStatus(`Right movement too small (${fmt(length,3)} m). Move farther right and save again.`); return; }
-  const right = normalize(horizontal);
-  calibration = {version:CALIBRATION_VERSION, origin:calibration.origin, right, up:QUEST_UP, state:'awaiting_forward', createdAt:calibration.createdAt};
-  saveCalibration(); refreshDisplayPoints(); updateStats(); draw();
-};
-saveForwardBtn.onclick = () => {
+  calibration.rightEnd = p;
+  calibration.right = normalize(horizontal);
+  calibration.state = 'right_ready';
+  localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+}
+function startForwardSample() {
   const p = requireLatest(); if (!p) return;
-  if (!hasRight()) { updateCalibrationStatus('Save the right direction first.'); return; }
-  const rawDelta = sub(p, calibration.origin);
+  if (!hasRight()) { updateCalibrationStatus('Save right first.'); return; }
+  calibration.forwardStart = p;
+  calibration.state = 'forward_started';
+  localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+}
+function saveForwardDirection() {
+  const p = requireLatest(); if (!p) return;
+  if (!hasRight() || !hasForwardStart()) { updateCalibrationStatus('Click Start forward sample first.'); return; }
+  const rawDelta = sub(p, calibration.forwardStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const orthogonal = sub(horizontal, mul(calibration.right, dot3(horizontal, calibration.right)));
   const length = norm(orthogonal);
   if (length < MIN_RIGHT_M) { updateCalibrationStatus(`Forward movement too small (${fmt(length,3)} m). Move farther forward and save again.`); return; }
-  const forward = normalize(orthogonal);
-  calibration = {version:CALIBRATION_VERSION, origin:calibration.origin, right:calibration.right, forward, up:QUEST_UP, state:'ready', createdAt:calibration.createdAt, completedAt:new Date().toISOString()};
-  saveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+  let forward = normalize(cross(QUEST_UP, calibration.right));
+  if (dot3(forward, orthogonal) < 0) forward = mul(forward, -1);
+  calibration.forwardEnd = p;
+  calibration.forwardHint = normalize(horizontal);
+  calibration.forward = forward;
+  calibration.state = 'forward_ready';
+  localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+}
+function saveOrigin() {
+  const p = requireLatest(); if (!p) return;
+  if (!hasForward()) { updateCalibrationStatus('Save forward first.'); return; }
+  calibration.origin = p;
+  calibration.state = 'ready';
+  calibration.completedAt = new Date().toISOString();
+  localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+  saveServerCalibration();
+}
+calibNextBtn.onclick = () => {
+  if (isCalibrated()) { calibration = null; beginCalibration(); return; }
+  if (!hasRightStart()) beginCalibration();
+  else if (!hasRight()) saveRightDirection();
+  else if (!hasForwardStart()) startForwardSample();
+  else if (!hasForward()) saveForwardDirection();
+  else if (!hasOrigin()) saveOrigin();
 };
 document.getElementById('resetCalib').onclick = () => {
-  calibration = null; localStorage.removeItem('questTeleopCalibration'); refreshDisplayPoints(); updateStats(); draw();
+  calibration = null;
+  localStorage.removeItem(profileKey());
+  refreshDisplayPoints(); updateStats(); draw();
 };
 document.getElementById('clear').onclick = () => { rawPoints = []; refreshDisplayPoints(); updateStats(); draw(); };
 document.getElementById('fit').onclick = () => { zoom = 1; draw(); };
 poseAxesBtn.onclick = () => { showPoseAxes = !showPoseAxes; poseAxesBtn.textContent = showPoseAxes ? 'Hide pose axes' : 'Show pose axes'; draw(); };
+rotationModeBtn.onclick = () => {
+  viewMode = viewMode === 'rotation' ? 'path' : 'rotation';
+  updateRotationStatus(); draw();
+};
+saveRotationBtn.onclick = () => {
+  if (!isCalibrated()) { updateRotationStatus('Finish position calibration before saving rotation.'); return; }
+  if (!latestRaw) { updateRotationStatus('No controller sample yet.'); return; }
+  calibration.rotation = {
+    version: 1,
+    neutralQuat: rawQuat(latestRaw),
+    gripperAxis: gripperAxisSelect.value,
+    capturedAt: new Date().toISOString(),
+    mode: 'controller-neutral-to-initial-libero-eef'
+  };
+  localSaveCalibration(); updateStats(); draw();
+  saveServerCalibration();
+};
+clearRotationBtn.onclick = () => {
+  if (calibration && calibration.rotation) {
+    delete calibration.rotation;
+    localSaveCalibration(); updateStats(); draw();
+    saveServerCalibration();
+  }
+};
+saveGripperAxisBtn.onclick = () => {
+  if (!isCalibrated()) { updateRotationStatus('Finish position calibration before saving gripper axis.'); return; }
+  calibration.rotation = calibration.rotation || {version: 1, mode: 'controller-neutral-to-initial-libero-eef'};
+  calibration.rotation.gripperAxis = gripperAxisSelect.value;
+  localSaveCalibration(); updateStats(); draw();
+  saveServerCalibration();
+};
+gripperAxisSelect.addEventListener('change', () => {
+  if (calibration && calibration.rotation) calibration.rotation.gripperAxis = gripperAxisSelect.value;
+  updateRotationStatus(); draw();
+});
+profileNameInput.addEventListener('change', () => {
+  currentProfile = sanitizeProfileName(profileNameInput.value);
+  profileNameInput.value = currentProfile;
+  const local = loadLocalCalibration(currentProfile);
+  if (local) applyCalibration(local, currentProfile, `Loaded local draft: ${currentProfile}`);
+  else profileStatus.textContent = `Profile name set: ${currentProfile}`;
+});
+profileSelect.addEventListener('change', () => {
+  if (profileSelect.value) {
+    profileNameInput.value = profileSelect.value;
+    loadServerCalibration(profileSelect.value);
+  }
+});
+loadProfileBtn.onclick = () => loadServerCalibration(profileNameInput.value);
+saveProfileBtn.onclick = () => saveServerCalibration();
 canvas.addEventListener('mousedown', e => { dragging = true; dragStart = {x:e.clientX, y:e.clientY, az, el}; });
 window.addEventListener('mouseup', () => dragging = false);
 window.addEventListener('mousemove', e => {
@@ -555,11 +921,53 @@ window.addEventListener('mousemove', e => {
   draw();
 });
 canvas.addEventListener('wheel', e => { e.preventDefault(); zoom *= Math.exp(-e.deltaY * 0.001); zoom = Math.max(.25, Math.min(6, zoom)); draw(); }, {passive:false});
+function loadProfiles() {
+  return fetch('/calibrations').then(r => r.json()).then(info => {
+    const activeProfile = sanitizeProfileName(info.active || currentProfile);
+    if (!profileInitialized) {
+      currentProfile = activeProfile;
+      profileInitialized = true;
+    } else {
+      currentProfile = sanitizeProfileName(currentProfile || activeProfile);
+    }
+    profileNameInput.value = currentProfile;
+    profileSelect.innerHTML = '';
+    const names = (info.profiles || []).map(p => p.name);
+    if (!names.includes(currentProfile)) names.unshift(currentProfile);
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      opt.selected = name === currentProfile;
+      profileSelect.appendChild(opt);
+    }
+    profileStatus.textContent = names.length ? `Profiles: ${names.length}` : 'No saved profiles yet.';
+    return info;
+  }).catch(err => {
+    profileStatus.textContent = `Profile list failed: ${err.message}`;
+    return {active: currentProfile, profiles: []};
+  });
+}
+function loadServerCalibration(profile=currentProfile) {
+  currentProfile = sanitizeProfileName(profile);
+  profileNameInput.value = currentProfile;
+  return fetch(`/calibration?profile=${encodeURIComponent(currentProfile)}`).then(r => r.ok ? r.json() : null).then(saved => {
+    if (saved && saved.version === CALIBRATION_VERSION) {
+      applyCalibration(saved, currentProfile, `Loaded profile: ${currentProfile}`);
+    } else {
+      const local = loadLocalCalibration(currentProfile);
+      applyCalibration(local, currentProfile, local ? `Loaded local draft: ${currentProfile}` : `No saved profile: ${currentProfile}`);
+    }
+  }).catch(err => {
+    const local = loadLocalCalibration(currentProfile);
+    applyCalibration(local, currentProfile, local ? `Loaded local draft after server error: ${currentProfile}` : `Load failed: ${err.message}`);
+  });
+}
+loadProfiles().then(() => loadServerCalibration(currentProfile));
 fetch('/snapshot').then(r => r.json()).then(handleEvent).catch(() => {});
 const es = new EventSource('/events');
 es.onmessage = e => handleEvent(JSON.parse(e.data));
 es.onerror = () => { gateText.textContent = 'disconnected'; dot.classList.remove('on'); };
-updateCalibrationStatus(); resize(); setInterval(draw, 1000);
+updateCalibrationStatus(); updateRotationStatus(); resize(); setInterval(draw, 1000);
 </script>
 </body>
 </html>
@@ -668,7 +1076,30 @@ def is_origin(position: list[float]) -> bool:
     return all(abs(value) < 1e-8 for value in position)
 
 
-def make_handler(state: LiveState) -> type[BaseHTTPRequestHandler]:
+PROFILE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def sanitize_profile(raw: str | None, default: str) -> str:
+    profile = (raw or default).strip()
+    if profile.endswith(".json"):
+        profile = profile[:-5]
+    if not profile or "/" in profile or "\\" in profile or not PROFILE_RE.fullmatch(profile):
+        raise ValueError("profile must contain only letters, numbers, '_', '-', or '.'")
+    return profile
+
+
+def calibration_file(calibration_dir: Path, profile: str) -> Path:
+    return calibration_dir / f"{profile}.json"
+
+
+def calibration_complete(data: Any) -> bool:
+    return isinstance(data, dict) and all(key in data for key in ("origin", "right", "forward", "up"))
+
+
+def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPRequestHandler]:
+    calibration_dir = calibration_path.parent
+    default_profile = calibration_path.stem
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, _format: str, *_args: Any) -> None:
             return
@@ -681,6 +1112,11 @@ def make_handler(state: LiveState) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(data)
 
+        def selected_calibration_path(self) -> Path:
+            query = parse_qs(urlparse(self.path).query)
+            profile = sanitize_profile(query.get("profile", [default_profile])[0], default_profile)
+            return calibration_file(calibration_dir, profile)
+
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             if path == "/":
@@ -688,6 +1124,39 @@ def make_handler(state: LiveState) -> type[BaseHTTPRequestHandler]:
                 return
             if path == "/snapshot":
                 self.send_text(json.dumps(state.snapshot(), separators=(",", ":")), "application/json")
+                return
+            if path == "/calibrations":
+                profiles = []
+                calibration_dir.mkdir(parents=True, exist_ok=True)
+                for item in sorted(calibration_dir.glob("*.json")):
+                    try:
+                        data = json.loads(item.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        data = None
+                    stat = item.stat()
+                    profiles.append(
+                        {
+                            "name": item.stem,
+                            "path": str(item),
+                            "mtime": stat.st_mtime,
+                            "version": data.get("version") if isinstance(data, dict) else None,
+                            "complete": calibration_complete(data),
+                        }
+                    )
+                self.send_text(
+                    json.dumps({"active": default_profile, "profiles": profiles}, separators=(",", ":")),
+                    "application/json",
+                )
+                return
+            if path == "/calibration":
+                try:
+                    selected = self.selected_calibration_path()
+                    if selected.exists():
+                        self.send_text(selected.read_text(encoding="utf-8"), "application/json")
+                    else:
+                        self.send_text("null", "application/json")
+                except ValueError as exc:
+                    self.send_text(str(exc), "text/plain; charset=utf-8", HTTPStatus.BAD_REQUEST)
                 return
             if path == "/events":
                 self.send_response(HTTPStatus.OK)
@@ -714,6 +1183,37 @@ def make_handler(state: LiveState) -> type[BaseHTTPRequestHandler]:
                 return
             self.send_text("Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
 
+        def do_POST(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            if path != "/calibration":
+                self.send_text("Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                data = json.loads(self.rfile.read(length).decode("utf-8"))
+                for key in ("origin", "right", "forward", "up"):
+                    if key not in data:
+                        raise ValueError(f"missing {key}")
+                selected = self.selected_calibration_path()
+                selected.parent.mkdir(parents=True, exist_ok=True)
+                selected.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            except (json.JSONDecodeError, OSError, ValueError) as exc:
+                self.send_text(f"Invalid calibration: {exc}", "text/plain; charset=utf-8", HTTPStatus.BAD_REQUEST)
+                return
+            self.send_text(json.dumps({"ok": True}, separators=(",", ":")), "application/json")
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            if path != "/calibration":
+                self.send_text("Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
+                return
+            try:
+                self.selected_calibration_path().unlink(missing_ok=True)
+            except (OSError, ValueError) as exc:
+                self.send_text(f"Could not delete calibration: {exc}", "text/plain; charset=utf-8", HTTPStatus.BAD_REQUEST)
+                return
+            self.send_text(json.dumps({"ok": True}, separators=(",", ":")), "application/json")
+
     return Handler
 
 
@@ -733,6 +1233,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--web-host", default="127.0.0.1")
     parser.add_argument("--web-port", type=int, default=8765)
     parser.add_argument("--out-dir", type=Path, default=Path("captures"))
+    parser.add_argument(
+        "--calibration-out",
+        type=Path,
+        default=DEFAULT_CALIBRATION_PATH,
+        help="Path where browser teleop-frame calibration is saved for downstream teleop scripts.",
+    )
     parser.add_argument("--session", default=dt.datetime.now().strftime("live_%Y%m%d_%H%M%S"))
     parser.add_argument("--max-points", type=int, default=5000, help="Max points kept in browser memory.")
     parser.add_argument("--print-every", type=int, default=60, help="Print every N accepted poses; 0 disables.")
@@ -770,7 +1276,8 @@ def main() -> int:
     remote_path = args.out_dir / f"{args.session}_remote.csv"
     events_path = args.out_dir / f"{args.session}_events.csv"
 
-    server = ReusableThreadingHTTPServer((args.web_host, args.web_port), make_handler(state))
+    args.calibration_out.parent.mkdir(parents=True, exist_ok=True)
+    server = ReusableThreadingHTTPServer((args.web_host, args.web_port), make_handler(state, args.calibration_out))
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     url = f"http://{args.web_host}:{args.web_port}/"

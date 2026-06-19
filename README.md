@@ -140,6 +140,18 @@ source .venv/bin/activate
 scripts/run_live3d.sh --adb-reverse --open-browser
 ```
 
+For reusable named calibration profiles, prefer:
+
+```bash
+cd ~/Codespace/quest-trajectory-recorder
+scripts/run_calibration.sh libero_default
+```
+
+This writes `calibrations/libero_default.json`. Use a different profile name for
+a different table / chair / camera setup. The web UI also has a `Profile`
+section, so you can load an existing profile or save the current calibration
+under a new name without restarting the server.
+
 Start the live viewer in LAN mode:
 
 ```bash
@@ -158,12 +170,11 @@ The viewer shows:
 - Start and latest points.
 - Controller orientation axes derived from the quaternion.
 - A browser-side teleop-frame calibration:
-  - Hold the controller at your neutral pose and click `Start calibration`.
-  - Move the controller 15-30 cm toward your intended right direction.
-  - Click `Save right direction`.
-  - Move the controller 15-30 cm toward your intended forward direction.
-  - Click `Save forward direction`.
-  - Quest gravity defines up; right and forward are orthogonalized from your motions.
+  - Click `Start right sample`, move the controller 15-30 cm toward your intended right direction, then click `Save right`.
+  - Click `Start forward sample`, move the controller 15-30 cm toward your intended forward direction, then click `Save forward`.
+  - Hold the controller at your neutral teleop origin and click `Save origin`.
+  - Quest gravity defines up. The right motion is flattened to the horizontal plane, and the forward motion only chooses the sign of the forward axis; the final forward axis is rebuilt as the right-handed direction orthogonal to right and up.
+  - Optional rotation: click `Show rotation view`, choose which controller local axis is the physical gripper / approach arrow, click `Save arrow axis`, hold the controller in the neutral gripper pose, then click `Save neutral rotation` before enabling LIBERO `--orientation`.
 - Current sample count and path length.
 - Latest position, quaternion, stream sequence, and gate state.
 - Controller status channels: B/stream pause on `8100`, resolution on `8095`,
@@ -179,6 +190,57 @@ Controls:
 - Use `Clear Local View` to clear only the browser's local display.
 
 The live viewer also writes `captures/live_*_remote.csv` unless started with `--no-record`.
+
+### Quest Focus / System UI Gotcha
+
+If the web viewer is connected but the controller pose freezes at the exact origin
+`0,0,0`, or the Quest shows Meta / Oculus system panels instead of giving the
+FrankaBot app focus, the APK is usually still running but no longer receiving
+effective VR tracking focus. Refocus it from the Mac:
+
+```bash
+adb shell am force-stop com.oculus.panelapp.library
+adb shell am force-stop com.oculus.store
+adb shell am start -n com.Xigbee.FrankaBot/com.unity3d.player.UnityPlayerActivity --es unity "-force-gles"
+```
+
+`scripts/start_frankabot.sh` does this automatically after launch. Use
+`--keep-panels` only if you intentionally want to leave Oculus panels open.
+
+
+## LIBERO Teleoperation
+
+After the live viewer calibration looks correct, the same saved calibration can
+be used to drive a LIBERO / robosuite Panda end-effector directly from the Quest
+controller stream. With the named-profile workflow, the browser calibration is
+saved automatically to:
+
+```text
+calibrations/libero_default.json
+```
+
+One-time local simulator setup:
+
+```bash
+cd ~/Codespace/quest-trajectory-recorder
+scripts/setup_libero_env.sh
+```
+
+Start the Quest APK and calibrate in the live viewer first. Then stop the live viewer, because both the viewer and LIBERO teleop bind the same Quest ZMQ ports. Start LIBERO teleop with the same profile:
+
+```bash
+cd ~/Codespace/quest-trajectory-recorder
+scripts/run_libero_teleop.sh --profile libero_default --task-suite-name libero_spatial --task-id 0
+```
+
+Default controls: `B` / stream `High` is the clutch, right trigger toggles the
+gripper, and the saved controller origin maps to the initial LIBERO EEF pose.
+Controller translation drives EEF translation. The LIBERO viewer marks the
+Quest-decoded target as a green cross/circle plus green gripper-direction arrow,
+and the current simulated EEF as a blue dot plus blue gripper-direction arrow.
+Rotation is off by default, so the Quest controls xyz + gripper unless
+`--orientation` is passed. See `docs/libero_teleop.md` for the axis mapping,
+rotation calibration, tuning flags, and the workspace-box calibration plan.
 
 ## Output Files
 
@@ -301,3 +363,5 @@ The viewer and Open-Teach bridge primarily use the quaternion for orientation; t
 - Open-Teach: https://github.com/aadhithya14/Open-Teach
 - Open-Teach network configuration: https://github.com/aadhithya14/Open-Teach/blob/main/configs/network.yaml
 - Open-Teach VR documentation: https://github.com/aadhithya14/Open-Teach/blob/main/docs/vr.md
+- LIBERO benchmark: https://github.com/Lifelong-Robot-Learning/LIBERO
+- robosuite human demonstration collection: https://github.com/ARISE-Initiative/robosuite
