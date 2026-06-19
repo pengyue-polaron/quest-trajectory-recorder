@@ -30,10 +30,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ "$USER_SET_CALIBRATION" -eq 0 ]]; then
-  EXTRA_ARGS=(--calibration "$ROOT/calibrations/${PROFILE}.json" "${EXTRA_ARGS[@]}")
+  PREFIX_ARGS=(--calibration "$ROOT/calibrations/${PROFILE}.json")
+  if [[ "${#EXTRA_ARGS[@]}" -gt 0 ]]; then
+    EXTRA_ARGS=("${PREFIX_ARGS[@]}" "${EXTRA_ARGS[@]}")
+  else
+    EXTRA_ARGS=("${PREFIX_ARGS[@]}")
+  fi
 fi
 if [[ "$USER_SET_RIGHT_AXIS" -eq 0 ]]; then
-  EXTRA_ARGS=(--libero-right-axis "${LIBERO_RIGHT_AXIS:-+y}" "${EXTRA_ARGS[@]}")
+  PREFIX_ARGS=(--libero-right-axis "${LIBERO_RIGHT_AXIS:-+y}")
+  if [[ "${#EXTRA_ARGS[@]}" -gt 0 ]]; then
+    EXTRA_ARGS=("${PREFIX_ARGS[@]}" "${EXTRA_ARGS[@]}")
+  else
+    EXTRA_ARGS=("${PREFIX_ARGS[@]}")
+  fi
 fi
 
 if [[ -n "${LIBERO_PYTHON:-}" ]]; then
@@ -48,4 +58,8 @@ fi
 
 export PYTHONPATH="$ROOT/src:${OPENPI_ROOT}/third_party/libero:${PYTHONPATH:-}"
 cd "$ROOT"
-exec "$PYTHON" -m quest_trajectory_recorder.libero_teleop --openpi-root "$OPENPI_ROOT" --adb-reverse "${EXTRA_ARGS[@]}"
+COMMAND=("$PYTHON" -m quest_trajectory_recorder.libero_teleop --openpi-root "$OPENPI_ROOT" --adb-reverse)
+if [[ "${#EXTRA_ARGS[@]}" -gt 0 ]]; then
+  COMMAND+=("${EXTRA_ARGS[@]}")
+fi
+exec "${COMMAND[@]}"

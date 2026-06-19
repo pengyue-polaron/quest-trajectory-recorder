@@ -34,3 +34,8 @@ The APK frame does not include a device timestamp. The receiver records local ar
 ## Open-Teach compatibility
 
 Open-Teach's original hand pipeline receives raw hand keypoints on `8087`, then publishes transformed hand frames on `8089`. This project adds a controller-pose adapter that republishes the observed `8125` stream as Open-Teach-style PUB/SUB topics.
+
+
+## Simulator target stream
+
+`quest-tracker-hub` is the preferred boundary between Quest tracking and simulator backends. It consumes the raw APK ports above, applies the selected calibration profile, and publishes a `TeleopTarget` JSON message on `tcp://127.0.0.1:8130` with topic `teleop_target`. Backends such as LIBERO should subscribe to this stream instead of binding the raw Quest ports themselves.

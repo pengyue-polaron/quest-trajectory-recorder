@@ -19,6 +19,7 @@ quest-clean = "quest_trajectory_recorder.clean:main"
 quest-plot2d = "quest_trajectory_recorder.plot2d:main"
 quest-plot3d = "quest_trajectory_recorder.plot3d:main"
 quest-live3d = "quest_trajectory_recorder.live3d:main"
+quest-tracker-hub = "quest_trajectory_recorder.quest_tracker_hub:main"
 quest-openteach-bridge = "quest_trajectory_recorder.openteach_bridge:main"
 quest-libero-teleop = "quest_trajectory_recorder.libero_teleop:main"
 

@@ -111,8 +111,14 @@ if [[ -s "${remote_csv}" ]]; then
 
   echo
   echo "Rendering trajectory plots..."
-  "$PYTHON" -m quest_trajectory_recorder.plot2d "${remote_csv}" --out "${plot_dir}/${session}_remote.svg" "${png_flag[@]}"
-  "$PYTHON" -m quest_trajectory_recorder.plot3d "${remote_csv}" --out "${plot_dir}/${session}_remote_3d.svg" "${png_flag[@]}"
+  plot2d_cmd=("$PYTHON" -m quest_trajectory_recorder.plot2d "${remote_csv}" --out "${plot_dir}/${session}_remote.svg")
+  plot3d_cmd=("$PYTHON" -m quest_trajectory_recorder.plot3d "${remote_csv}" --out "${plot_dir}/${session}_remote_3d.svg")
+  if [[ "${#png_flag[@]}" -gt 0 ]]; then
+    plot2d_cmd+=("${png_flag[@]}")
+    plot3d_cmd+=("${png_flag[@]}")
+  fi
+  "${plot2d_cmd[@]}"
+  "${plot3d_cmd[@]}"
 else
   echo "No remote trajectory CSV was created: ${remote_csv}" >&2
   exit 2

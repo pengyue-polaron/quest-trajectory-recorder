@@ -1,6 +1,6 @@
 # Quest to LIBERO Teleop
 
-This path uses the recovered `com.Xigbee.FrankaBot` Quest APK as the tracker and drives LIBERO directly through robosuite `OSC_POSE` actions.
+This path uses the recovered `com.Xigbee.FrankaBot` Quest APK as the tracker, publishes calibrated `TeleopTarget` messages, and drives LIBERO through robosuite `OSC_POSE` actions.
 
 ## Why this route
 
@@ -9,12 +9,13 @@ There are two existing approaches worth knowing:
 - LIBERO's built-in demonstration script uses robosuite `input2action` with keyboard or SpaceMouse. It is mature, but it is not Quest-based.
 - Open-Teach has a `LiberoSimOperator` and `LiberoEnv` pair. It maps VR hand-frame deltas to LIBERO relative actions and streams the simulator image back to the headset. It is mature for the original hand-tracking / bimanual APK path, but it is heavier than needed when the Quest is only a USB tracker.
 
-This repository keeps the smaller path:
+This repository keeps a small split pipeline:
 
 ```text
 Quest controller -> FrankaBot APK -> ADB reverse ZMQ 8125/8100
-  -> quest-libero-teleop -> LIBERO robosuite OSC_POSE action
-  -> MuJoCo viewer on the Mac
+  -> quest-tracker-hub -> TeleopTarget stream
+  -> quest-libero-teleop --input-source target
+  -> LIBERO robosuite OSC_POSE action -> MuJoCo viewer on the Mac
 ```
 
 ## Calibration model
@@ -98,21 +99,28 @@ should overlap `standard gripper down`. If it points the opposite way, change
 the gripper arrow axis from `+x` to `-x`, `+y` to `-y`, or `+z` to `-z`, save
 the arrow axis, and save neutral rotation again.
 
-Then start LIBERO teleop:
+Then start the split hub/subscriber pipeline:
 
 ```bash
-cd ~/Codespace/quest-trajectory-recorder
+# Shell A: only this process owns raw Quest ports and ADB reverse
+scripts/run_quest_tracker_hub.sh --profile libero_default
+
+# Shell B: LIBERO subscribes to the calibrated TeleopTarget stream
 scripts/run_libero_teleop.sh \
   --profile libero_default \
+  --input-source target \
   --task-suite-name libero_spatial \
   --task-id 0
 ```
+
+LIBERO subscribes to `TeleopTarget` on `tcp://127.0.0.1:8130`, so an Isaac Sim backend, recorder, or future ROS2 bridge can reuse the same stream without touching raw Quest ports.
 
 Enable rotation after xyz translation and trigger control feel correct:
 
 ```bash
 scripts/run_libero_teleop.sh \
   --profile libero_default \
+  --input-source target \
   --task-suite-name libero_spatial \
   --task-id 0 \
   --orientation
@@ -123,7 +131,7 @@ Controls:
 - The LIBERO OpenCV viewer marks the Quest-decoded target EEF as a green cross/circle and green arrow. It marks the current simulated EEF as a blue dot and blue arrow. Use `--no-debug-overlay` to disable markers.
 - The arrows are drawn from robosuite's controlled `grip_site` frame, not the Panda `hand` body quaternion. This matters because `robot0_eef_quat` can describe the hand body while `OSC_POSE` controls the gripper site.
 - Press `B` / stream `High` to clutch and drive the arm. Releasing the stream gate holds position.
-- By default, the saved controller `origin` maps to the initial LIBERO end-effector pose, so opening LIBERO does not silently treat the current controller pose as zero. Use `--home-mode clutch-current` only if you intentionally want the old SpaceMouse-like behavior where every clutch press re-homes to the current controller pose.
+- The saved controller `origin` maps to the initial LIBERO end-effector pose, so opening LIBERO does not silently treat the current controller pose as zero.
 - If the stream is already `High` when LIBERO starts, the script waits until you release `B` once. This prevents an accidental jump from a stale clutch state.
 - Right trigger controls the gripper. Default mode toggles open/close on the rising edge.
 - Move the controller in calibrated right / forward / up directions to move the LIBERO end-effector.
@@ -133,16 +141,16 @@ Useful tuning flags:
 
 ```bash
 # Slower and safer translation
-scripts/run_libero_teleop.sh --position-scale 0.6 --position-action-gain 8
+scripts/run_libero_teleop.sh --profile robotics_lab --input-source target --position-scale 0.6 --position-action-gain 8
 
 # Enable controller rotation after xyz feels correct
-scripts/run_libero_teleop.sh --profile robotics_lab --orientation
+scripts/run_libero_teleop.sh --profile robotics_lab --input-source target --orientation
 
 # If the overlay arrow uses the wrong robosuite local gripper axis
-scripts/run_libero_teleop.sh --profile robotics_lab --orientation --target-gripper-axis -z
+scripts/run_libero_teleop.sh --profile robotics_lab --input-source target --orientation --target-gripper-axis -z
 
 # If trigger should close only while held instead of toggling
-scripts/run_libero_teleop.sh --gripper-mode hold
+scripts/run_quest_tracker_hub.sh --profile robotics_lab --gripper-mode hold
 ```
 
 `--target-gripper-axis auto` is the default. It chooses the robosuite gripper

@@ -1,6 +1,13 @@
 # Quest Trajectory Recorder
 
-A lightweight receiver and visualization toolkit for Quest controller trajectory streams. The recorder listens to the Quest application's ZMQ outputs, saves pose data to CSV/JSONL, and provides offline plots and a live 3D browser view.
+A lightweight Quest controller tracking toolkit for calibration, recording, and simulator teleoperation. The preferred runtime path publishes a calibrated simulator-neutral `TeleopTarget` stream, then lets LIBERO, Isaac Sim, or another backend subscribe to that stream.
+
+The codebase is split into small runtime modules: `receiver.py` parses Quest
+frames, `teleop_frame.py` applies saved calibration profiles,
+`teleop_target.py` defines the simulator-neutral target schema,
+`quest_tracker_hub.py` can publish that target stream, and simulator backends
+such as `libero_teleop.py` consume it. See `docs/architecture.md` for the full
+module map.
 
 ## Supported Quest Application
 
@@ -41,6 +48,7 @@ The recorder uses the host receive time (`recv_unix`, `recv_iso`). The Quest app
 | `8089` | host -> local subscribers | Open-Teach-style transformed frame, produced by the optional bridge |
 | `8093` | host -> local subscribers | Open-Teach-style resolution topic, produced by the optional bridge |
 | `8102` | host -> local subscribers | Open-Teach-style pause topic, produced by the optional bridge |
+| `8130` | host -> local subscribers | Simulator-neutral `TeleopTarget` PUB stream, produced by `quest-tracker-hub` |
 
 ## Installation
 
@@ -122,7 +130,7 @@ Recommended recording sequence:
 
 The script stops automatically after the pause state is stable and no new trajectory frames arrive.
 
-## Live 3D Viewer
+## Calibration And Settings Tool
 
 If using the recovered `com.Xigbee.FrankaBot` APK over USB/ADB, first configure
 and launch the Quest side from the Mac:
@@ -164,11 +172,12 @@ If the browser is not opened automatically, visit:
 http://127.0.0.1:8765/
 ```
 
-The viewer shows:
+The browser tool shows:
 
 - The live 3D trajectory.
 - Start and latest points.
 - Controller orientation axes derived from the quaternion.
+- Quest stream/profile readiness, the next calibration action, and the LIBERO launch command for the active profile.
 - A browser-side teleop-frame calibration:
   - Click `Start right sample`, move the controller 15-30 cm toward your intended right direction, then click `Save right`.
   - Click `Start forward sample`, move the controller 15-30 cm toward your intended forward direction, then click `Save forward`.
@@ -211,8 +220,8 @@ adb shell am start -n com.Xigbee.FrankaBot/com.unity3d.player.UnityPlayerActivit
 ## LIBERO Teleoperation
 
 After the live viewer calibration looks correct, the same saved calibration can
-be used to drive a LIBERO / robosuite Panda end-effector directly from the Quest
-controller stream. With the named-profile workflow, the browser calibration is
+be used to drive a LIBERO / robosuite Panda end-effector through the decoupled
+`TeleopTarget` hub. With the named-profile workflow, the browser calibration is
 saved automatically to:
 
 ```text
@@ -226,21 +235,23 @@ cd ~/Codespace/quest-trajectory-recorder
 scripts/setup_libero_env.sh
 ```
 
-Start the Quest APK and calibrate in the live viewer first. Then stop the live viewer, because both the viewer and LIBERO teleop bind the same Quest ZMQ ports. Start LIBERO teleop with the same profile:
+Start the Quest APK and calibrate in the live viewer first. Then stop the live viewer, because the viewer and the hub both bind the raw Quest ZMQ ports. Run the calibrated target hub in one shell and point LIBERO at that stream from another shell:
 
 ```bash
-cd ~/Codespace/quest-trajectory-recorder
-scripts/run_libero_teleop.sh --profile libero_default --task-suite-name libero_spatial --task-id 0
+# Shell A: Quest raw stream -> calibrated TeleopTarget publisher
+scripts/run_quest_tracker_hub.sh --profile libero_default
+
+# Shell B: LIBERO consumes TeleopTarget instead of raw Quest ports
+scripts/run_libero_teleop.sh \
+  --profile libero_default \
+  --input-source target \
+  --task-suite-name libero_spatial \
+  --task-id 0
 ```
 
-Default controls: `B` / stream `High` is the clutch, right trigger toggles the
-gripper, and the saved controller origin maps to the initial LIBERO EEF pose.
-Controller translation drives EEF translation. The LIBERO viewer marks the
-Quest-decoded target as a green cross/circle plus green gripper-direction arrow,
-and the current simulated EEF as a blue dot plus blue gripper-direction arrow.
-Rotation is off by default, so the Quest controls xyz + gripper unless
-`--orientation` is passed. See `docs/libero_teleop.md` for the axis mapping,
-rotation calibration, tuning flags, and the workspace-box calibration plan.
+This is the only documented simulator path now: new backends should subscribe to the `TeleopTarget` stream instead of reparsing Quest APK frames or owning ADB/ZMQ ports directly.
+
+Default controls: `B` / stream `High` is the clutch, right trigger toggles the gripper, and the saved controller origin maps to the initial LIBERO EEF pose. Controller translation drives EEF translation. The LIBERO viewer marks the Quest-decoded target as a green cross/circle plus green gripper-direction arrow, and the current simulated EEF as a blue dot plus blue gripper-direction arrow. Rotation is off by default, so add `--orientation` to the LIBERO command after saving neutral rotation in the web UI. See `docs/libero_teleop.md` for the focused runbook.
 
 ## Output Files
 

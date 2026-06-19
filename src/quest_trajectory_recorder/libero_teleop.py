@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""Teleoperate a LIBERO / robosuite Panda from the recovered Quest controller stream.
+"""Teleoperate a LIBERO / robosuite Panda from Quest-derived TeleopTarget data.
 
-This intentionally bypasses the full Open-Teach process graph. The Quest APK is
-already producing a reliable world-frame controller pose; this process consumes
-that stream and converts it into robosuite OSC_POSE actions for LIBERO.
+This can read the Quest APK ports directly for compatibility, or subscribe to a
+separate quest-tracker-hub publisher so simulator backends do not own raw Quest
+transport details.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import os
 import signal
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -22,33 +20,34 @@ from typing import Any
 
 import zmq
 
-from .live3d import DEFAULT_GRIPPER_PORT, setup_adb_reverse
-from .receiver import DEFAULT_PORTS, parse_remote_text
+from .quest_target_source import (
+    DEFAULT_TARGET_ENDPOINT,
+    DEFAULT_TARGET_TOPIC,
+    DirectQuestTargetSource,
+    TeleopTargetSubscriber,
+    newest_from_socket,
+)
+from .quest_ports import DEFAULT_GRIPPER_PORT, setup_adb_reverse
+from .receiver import DEFAULT_PORTS
+from .teleop_frame import (
+    AXIS_NAMES,
+    AXIS_VECTORS,
+    QuestCalibration,
+    build_axis_map,
+    load_quest_calibration,
+    quest_pos_to_teleop,
+    quest_rotation_to_teleop_matrix,
+    quat_xyzw_to_matrix,
+    resolve_gripper_axis,
+)
+from .teleop_target import TeleopTarget, valid_remote
+
+# Some moved helpers are re-exported from this module for older local scripts.
 
 try:  # Optional at import time; required only when running LIBERO.
     import numpy as np
 except ModuleNotFoundError:  # pragma: no cover - exercised only without numpy installed
     np = None  # type: ignore[assignment]
-
-
-AXIS_VECTORS = {
-    "+x": (1.0, 0.0, 0.0),
-    "-x": (-1.0, 0.0, 0.0),
-    "+y": (0.0, 1.0, 0.0),
-    "-y": (0.0, -1.0, 0.0),
-    "+z": (0.0, 0.0, 1.0),
-    "-z": (0.0, 0.0, -1.0),
-}
-AXIS_NAMES = tuple(AXIS_VECTORS)
-
-
-@dataclass
-class QuestCalibration:
-    origin: Any
-    right: Any
-    forward: Any
-    up: Any
-    rotation_neutral: Any | None = None
 
 
 @dataclass
@@ -92,19 +91,6 @@ def _axis(name: str) -> Any:
     return npx.asarray(AXIS_VECTORS[name], dtype=float)
 
 
-def resolve_gripper_axis(name: str, initial_eef_rot: Any) -> str:
-    """Return the EEF local axis used for the debug gripper/approach arrow."""
-    if name != "auto":
-        return name
-    npx = _require_numpy()
-    world_down = npx.asarray([0.0, 0.0, -1.0], dtype=float)
-    scores = {
-        axis_name: float((npx.asarray(initial_eef_rot, dtype=float) @ _axis(axis_name)) @ world_down)
-        for axis_name in AXIS_NAMES
-    }
-    return max(scores, key=scores.get)
-
-
 def _norm(v: Any) -> Any:
     npx = _require_numpy()
     v = npx.asarray(v, dtype=float)
@@ -112,24 +98,6 @@ def _norm(v: Any) -> Any:
     if length <= 1e-12:
         return v * 0.0
     return v / length
-
-
-def quat_xyzw_to_matrix(quat: Any) -> Any:
-    """Convert xyzw quaternion to a 3x3 rotation matrix."""
-    npx = _require_numpy()
-    qx, qy, qz, qw = [float(v) for v in quat]
-    length = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
-    if length <= 1e-12:
-        return npx.eye(3)
-    qx, qy, qz, qw = qx / length, qy / length, qz / length, qw / length
-    return npx.asarray(
-        [
-            [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)],
-            [2 * (qx * qy + qw * qz), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qw * qx)],
-            [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx * qx + qy * qy)],
-        ],
-        dtype=float,
-    )
 
 
 def matrix_to_rotvec(matrix: Any) -> Any:
@@ -161,56 +129,10 @@ def current_grip_site_rot(env: Any) -> Any:
     return npx.asarray(env.sim.data.site_xmat[site_id], dtype=float).reshape(3, 3).copy()
 
 
-def load_quest_calibration(path: Path | None) -> QuestCalibration | None:
-    if path is None or not path.exists():
-        return None
-    npx = _require_numpy()
-    data = json.loads(path.read_text())
-    try:
-        return QuestCalibration(
-            origin=npx.asarray([data["origin"][k] for k in ("x", "y", "z")], dtype=float),
-            right=_norm([data["right"][k] for k in ("x", "y", "z")]),
-            forward=_norm([data["forward"][k] for k in ("x", "y", "z")]),
-            up=_norm([data["up"][k] for k in ("x", "y", "z")]),
-            rotation_neutral=(
-                npx.asarray([data["rotation"]["neutralQuat"][k] for k in ("x", "y", "z", "w")], dtype=float)
-                if data.get("rotation", {}).get("neutralQuat")
-                else None
-            ),
-        )
-    except KeyError as exc:
-        raise ValueError(f"Invalid calibration file {path}: missing {exc}") from exc
-
-
-def quest_pos_to_teleop(pos: Any, calibration: QuestCalibration | None) -> Any:
-    npx = _require_numpy()
-    pos = npx.asarray(pos, dtype=float)
-    if calibration is None:
-        # Fallback matching the live viewer before browser calibration.
-        return npx.asarray([pos[0], pos[2], pos[1]], dtype=float)
-    delta = pos - calibration.origin
-    return npx.asarray(
-        [float(delta @ calibration.right), float(delta @ calibration.forward), float(delta @ calibration.up)],
-        dtype=float,
-    )
-
-
-def quest_rotation_to_teleop_matrix(quat: Any, calibration: QuestCalibration | None) -> Any:
-    npx = _require_numpy()
-    quest_rot = quat_xyzw_to_matrix(quat)
-    if calibration is None:
-        return quest_rot
-    quest_to_teleop = npx.vstack([calibration.right, calibration.forward, calibration.up])
-    return quest_to_teleop @ quest_rot
-
-
 def build_teleop_to_libero(right_axis: str, forward_axis: str, up_axis: str) -> Any:
     """Return a matrix mapping [right, forward, up] into LIBERO world xyz."""
     npx = _require_numpy()
-    matrix = npx.column_stack([_axis(right_axis), _axis(forward_axis), _axis(up_axis)])
-    if abs(float(npx.linalg.det(matrix))) < 1e-6:
-        raise ValueError("LIBERO right/forward/up axes must be orthogonal and non-degenerate")
-    return matrix
+    return npx.asarray(build_axis_map(right_axis, forward_axis, up_axis), dtype=float)
 
 
 def setup_libero_imports(openpi_root: Path, config_dir: Path) -> None:
@@ -281,26 +203,10 @@ def make_libero_env(args: argparse.Namespace) -> tuple[Any, str, Any | None]:
     return env, str(task_description), init_states
 
 
-def valid_remote(remote: dict[str, Any] | None) -> bool:
-    if not remote:
-        return False
-    return any(abs(float(v)) > 1e-8 for v in remote["position"])
-
-
-def newest_from_socket(socket: zmq.Socket) -> bytes | None:
-    payload = None
-    while True:
-        try:
-            payload = socket.recv(flags=zmq.NOBLOCK)
-        except zmq.Again:
-            return payload
-
-
 def compute_action(
     *,
-    remote: dict[str, Any],
+    target: TeleopTarget,
     obs: dict[str, Any],
-    calibration: QuestCalibration | None,
     teleop_to_libero: Any,
     home: TeleopHome,
     current_eef_rot: Any,
@@ -313,7 +219,7 @@ def compute_action(
     orientation: bool,
 ) -> tuple[Any, TeleopHome]:
     npx = _require_numpy()
-    quest_pos = quest_pos_to_teleop(remote["position"], calibration)
+    quest_pos = npx.asarray(target.position, dtype=float)
     quest_delta = quest_pos - home.quest_pos
     target_pos = home.eef_pos + teleop_to_libero @ (quest_delta * position_scale)
 
@@ -325,7 +231,7 @@ def compute_action(
     pos_action = (target_pos - curr_pos) * position_action_gain
 
     if orientation:
-        quest_rot = quest_rotation_to_teleop_matrix(remote["rotation"], calibration)
+        quest_rot = npx.asarray(target.rotation, dtype=float)
         quest_rel = quest_rot @ home.quest_rot.T
         robot_rel = teleop_to_libero @ quest_rel @ teleop_to_libero.T
         target_rot = robot_rel @ home.eef_rot
@@ -474,6 +380,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
     parser.add_argument("--gripper-port", type=int, default=DEFAULT_GRIPPER_PORT)
     parser.add_argument("--adb-reverse", action="store_true")
+    parser.add_argument(
+        "--input-source",
+        choices=("direct", "target"),
+        default="direct",
+        help="direct reads Quest APK ports; target subscribes to quest-tracker-hub TeleopTarget.",
+    )
+    parser.add_argument("--target-endpoint", default=DEFAULT_TARGET_ENDPOINT)
+    parser.add_argument("--target-topic", default=DEFAULT_TARGET_TOPIC)
     parser.add_argument("--no-gate", action="store_true", help="Ignore B/stream gate and always teleoperate.")
     parser.add_argument("--trajectory-gate-pause", choices=("High", "Low"), default="High")
     parser.add_argument(
@@ -512,8 +426,10 @@ def main() -> int:
     args = parse_args()
     npx = _require_numpy()
 
-    if args.adb_reverse:
+    if args.adb_reverse and args.input_source == "direct":
         setup_adb_reverse([args.remote_port, args.pause_port, args.resolution_port, args.gripper_port])
+    elif args.adb_reverse:
+        print("Note: --adb-reverse is ignored with --input-source target; run it on quest-tracker-hub instead.", flush=True)
 
     calibration = load_quest_calibration(args.calibration)
     if calibration is None:
@@ -566,31 +482,31 @@ def main() -> int:
         )
 
     context = zmq.Context()
-    remote_socket = context.socket(zmq.PULL)
-    remote_socket.setsockopt(zmq.LINGER, 0)
-    remote_socket.setsockopt(zmq.CONFLATE, 1)
-    remote_socket.bind(f"tcp://{args.host}:{args.remote_port}")
+    if args.input_source == "target":
+        source = TeleopTargetSubscriber(context=context, endpoint=args.target_endpoint, topic=args.target_topic)
+        print(f"Subscribing to TeleopTarget stream: {args.target_endpoint} topic={args.target_topic!r}", flush=True)
+    else:
+        source = DirectQuestTargetSource(
+            context=context,
+            host=args.host,
+            remote_port=args.remote_port,
+            pause_port=args.pause_port,
+            calibration=calibration,
+            no_gate=args.no_gate,
+            trajectory_gate_pause=args.trajectory_gate_pause,
+            allow_initial_high=args.allow_initial_high,
+            gripper_mode=args.gripper_mode,
+        )
+        print("Reading Quest APK ports directly. For decoupled simulators, run quest-tracker-hub and use --input-source target.", flush=True)
 
-    pause_socket = context.socket(zmq.PULL)
-    pause_socket.setsockopt(zmq.LINGER, 0)
-    pause_socket.setsockopt(zmq.CONFLATE, 1)
-    pause_socket.bind(f"tcp://{args.host}:{args.pause_port}")
-
-    poller = zmq.Poller()
-    poller.register(remote_socket, zmq.POLLIN)
-    poller.register(pause_socket, zmq.POLLIN)
-
-    latest_remote: dict[str, Any] | None = None
-    latest_remote_at: float | None = None
+    latest_target: TeleopTarget | None = None
+    latest_target_at: float | None = None
     latest_quest_pos: Any | None = None
     remote_count = 0
     pause_state: str | None = None
     gate_open = bool(args.no_gate)
-    gate_armed = bool(args.no_gate or args.allow_initial_high)
-    initial_high_warned = False
     home: TeleopHome | None = None
     gripper = -1.0
-    prev_flag = False
     step_idx = 0
     stop = False
 
@@ -608,63 +524,35 @@ def main() -> int:
 
     try:
         while not stop:
-            ready = dict(poller.poll(timeout=max(1, int(1000 / args.control_freq))))
-            if pause_socket in ready:
-                payload = newest_from_socket(pause_socket)
-                if payload is not None:
-                    state = payload.decode("utf-8", errors="replace").strip()
-                    pause_state = state
-                    was_open = gate_open
-                    if args.no_gate:
-                        next_gate_open = True
-                    elif state == args.trajectory_gate_pause and gate_armed:
-                        next_gate_open = True
-                    else:
-                        next_gate_open = False
-                        if state != args.trajectory_gate_pause:
-                            gate_armed = True
-                    if state == args.trajectory_gate_pause and not gate_armed and not initial_high_warned:
-                        print("Stream is already High; release B once, then press B again to clutch.", flush=True)
-                        initial_high_warned = True
-                    gate_open = next_gate_open
-                    if gate_open and not was_open:
-                        if args.home_mode == "clutch-current":
-                            home = None
-                            print("Teleop clutch engaged; next valid pose will re-home controller to current EEF.", flush=True)
-                        else:
-                            print("Teleop clutch engaged; using saved calibration origin as controller zero.", flush=True)
-                    elif was_open and not gate_open:
-                        print("Teleop clutch released; robot holds position.", flush=True)
+            was_gate_open = gate_open
+            target = source.poll(max(1, int(1000 / args.control_freq)))
+            for event in source.take_events():
+                print(event, flush=True)
+            if target is not None:
+                latest_target = target
+                latest_target_at = target.timestamp
+                latest_quest_pos = npx.asarray(target.position, dtype=float)
+                remote_count = target.remote_count
+                pause_state = target.pause_state
+                gate_open = target.gate_open
+                gripper = target.gripper
+            elif latest_target is not None:
+                gate_open = bool(getattr(source, "gate_open", latest_target.gate_open))
+                gripper = float(getattr(source, "gripper", latest_target.gripper))
+                pause_state = getattr(source, "pause_state", pause_state)
 
-            if remote_socket in ready:
-                payload = newest_from_socket(remote_socket)
-                if payload is not None:
-                    try:
-                        remote = parse_remote_text(payload.decode("utf-8", errors="replace").strip())
-                    except (TypeError, ValueError):
-                        remote = None
-                    if valid_remote(remote):
-                        latest_remote = remote
-                        latest_remote_at = time.time()
-                        latest_quest_pos = quest_pos_to_teleop(latest_remote["position"], calibration)
-                        remote_count += 1
+            if gate_open and not was_gate_open and args.home_mode == "clutch-current":
+                home = None
+                print("Teleop clutch engaged; next valid target will re-home controller to current EEF.", flush=True)
 
-            if latest_remote is None:
+            if latest_target is None:
                 action = npx.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, gripper], dtype=float)
             elif gate_open:
-                flag = bool(latest_remote.get("flag"))
-                if args.gripper_mode == "toggle":
-                    if flag and not prev_flag:
-                        gripper = 1.0 if gripper < 0 else -1.0
-                else:
-                    gripper = 1.0 if flag else -1.0
-                prev_flag = flag
-
                 if home is None:
-                    qpos = quest_pos_to_teleop(latest_remote["position"], calibration)
-                    qrot_current = quest_rotation_to_teleop_matrix(latest_remote["rotation"], calibration)
+                    qpos = npx.asarray(latest_target.position, dtype=float)
+                    qrot_current = npx.asarray(latest_target.rotation, dtype=float)
                     if args.home_mode == "calibration-origin" and calibration is not None and calibration.rotation_neutral is not None:
-                        qrot = quest_rotation_to_teleop_matrix(calibration.rotation_neutral, calibration)
+                        qrot = npx.asarray(quest_rotation_to_teleop_matrix(calibration.rotation_neutral, calibration), dtype=float)
                         rotation_home = "saved-neutral"
                     else:
                         qrot = qrot_current
@@ -687,9 +575,8 @@ def main() -> int:
                         flush=True,
                     )
                 action, home = compute_action(
-                    remote=latest_remote,
+                    target=latest_target,
                     obs=obs,
-                    calibration=calibration,
                     teleop_to_libero=teleop_to_libero,
                     home=home,
                     current_eef_rot=current_grip_site_rot(env),
@@ -702,7 +589,6 @@ def main() -> int:
                     orientation=args.orientation,
                 )
             else:
-                prev_flag = bool(latest_remote.get("flag")) if latest_remote else prev_flag
                 action = npx.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, gripper], dtype=float)
 
             obs, _reward, done, _info = env.step(action)
@@ -726,8 +612,8 @@ def main() -> int:
                         quest_delta=quest_delta,
                         action=action,
                         remote_count=remote_count,
-                        remote_age=None if latest_remote_at is None else time.time() - latest_remote_at,
-                        flag=None if latest_remote is None else bool(latest_remote.get("flag")),
+                        remote_age=None if latest_target_at is None else time.time() - latest_target_at,
+                        flag=None if latest_target is None else latest_target.flag,
                         homed=home is not None,
                     ),
                     enabled=not args.no_debug_overlay,
@@ -749,8 +635,7 @@ def main() -> int:
             env.close()
         except Exception:
             pass
-        remote_socket.close(0)
-        pause_socket.close(0)
+        source.close()
         context.term()
     return 0
 
