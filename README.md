@@ -123,6 +123,14 @@ The script stops automatically after the pause state is stable and no new trajec
 
 ## Live 3D Viewer
 
+If using the recovered `com.Xigbee.FrankaBot` APK over USB/ADB, first configure
+and launch the Quest side from the Mac:
+
+```bash
+cd ~/Codespace/quest-trajectory-recorder
+scripts/start_frankabot.sh
+```
+
 Start the live viewer in ADB reverse mode:
 
 ```bash
@@ -148,6 +156,13 @@ The viewer shows:
 - The live 3D trajectory.
 - Start and latest points.
 - Controller orientation axes derived from the quaternion.
+- A browser-side teleop-frame calibration:
+  - Hold the controller at your neutral pose and click `Start calibration`.
+  - Move the controller 15-30 cm toward your intended right direction.
+  - Click `Save right direction`.
+  - Move the controller 15-30 cm toward your intended forward direction.
+  - Click `Save forward direction`.
+  - Quest gravity defines up; right and forward are orthogonalized from your motions.
 - Current sample count and path length.
 - Latest position, quaternion, stream sequence, and gate state.
 
