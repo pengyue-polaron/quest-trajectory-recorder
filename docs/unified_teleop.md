@@ -60,6 +60,20 @@ the raw Quest ports in the tracker hub, starts the selected backend, starts the
 Foxglove SDK gateway, and opens the organization layout. Exiting the backend or
 interrupting the launcher stops the complete child-process set.
 
+It waits up to 120 seconds for an authorized Quest by default, so the practical
+sequence is simply: power/wake Quest, connect USB, run the command, wear the
+headset, pick up the right controller, then press `B` to clutch.
+`--adb-wait-seconds N` changes the startup wait. During a session, the hub restores reverse ports
+and FrankaBot focus after an ADB reconnect without restarting the simulator.
+
+Do wear the headset while controlling. Meta can leave ADB and the controller
+radio connected while marking the controller `CONNECTED_INACTIVE`; in that
+state the app receives no usable 6DoF pose. If tracking drops, the backend
+freezes Cartesian motion. Pick up the right controller and wave it in the
+headset's view. Recovery requires six consecutive valid frames and then
+re-anchors controller-to-EEF motion at the current pose, so a reacquisition
+jump cannot make the arm chase its pre-dropout target.
+
 Real collection refuses a missing calibration profile. The doctor verifies
 ADB, authorization, APK/activity, reverse ports, and calibration geometry.
 Physical pose signs, trigger behavior, and human-operable gains still require a
@@ -108,6 +122,7 @@ Topics:
 - `/teleop/telemetry`
 - `/teleop/target`
 - `/teleop/source_status`
+- `/teleop/diagnostics` (`diagnostic_msgs/msg/DiagnosticArray`)
 
 Services:
 
@@ -120,6 +135,23 @@ Every service waits for an `embodied.teleop_command_result/v1` response. The
 backend remains the safety authority and duplicate request IDs are never
 applied twice.
 
+The default layout renders `/teleop/diagnostics` with Foxglove's Diagnostics
+Summary and Diagnostic Detail panels. `Teleop/Workflow` gives one plain-language
+state plus the next operator action. `Teleop/Safety` carries only the guard
+evidence needed to explain a hold or recovery. Raw JSON topics remain available
+for engineering plots but are not part of the operator layout.
+
+Interactive ManiSkill collection disables the environment's registered
+700-step timeout. A completed or explicitly timed episode enters Hold and waits
+for Previous, Reset, or Next; it never advances to another scene on its own.
+Use `--episode-max-steps N` only when a deliberate timeout is useful.
+
+Default tracking protection is fail-closed: 250 ms target timeout, six-frame
+recovery, rejection of a controller step over 6 cm, 1 mm positional deadband,
+50 ms smoothing, and a 0.5 m/s guarded target slew limit. Both backends also
+apply their own workspace and native-action limits. These values are CLI
+options when a task needs deliberate tuning.
+
 The same layout is shared by both maintained simulator backends:
 
 ![ManiSkill Foxglove teleoperation](images/foxglove_maniskill.png)
@@ -130,8 +162,9 @@ The same layout is shared by both maintained simulator backends:
 
 - Quest repository: APK parsing, ADB, calibration, target publication, session
   composition, and the Foxglove gateway/layout.
-- `embodied-ops`: the canonical schemas and ZMQ transport only.
-- Backend repository: clutch, watchdog, workspace/action limits, native action,
+- `embodied-ops`: canonical schemas, ZMQ transport, and the source-neutral
+  Cartesian dropout/reacquisition guard.
+- Backend repository: clutch configuration, workspace/action limits, native action,
   task reset/navigation, cameras, recording, and command acknowledgement.
 - Foxglove: visualization and semantic service requests; never raw actuator
   authority.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -19,7 +20,18 @@ TELEOP_TARGET_SCHEMA = TARGET_SCHEMA
 def valid_remote(remote: dict[str, Any] | None) -> bool:
     if not remote:
         return False
-    return any(abs(float(value)) > 1e-8 for value in remote["position"])
+    try:
+        position = [float(value) for value in remote["position"]]
+        rotation = [float(value) for value in remote["rotation"]]
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (
+        len(position) == 3
+        and len(rotation) == 4
+        and all(math.isfinite(value) for value in (*position, *rotation))
+        and any(abs(value) > 1e-8 for value in position)
+        and math.sqrt(sum(value * value for value in rotation)) > 1e-6
+    )
 
 
 def target_from_remote(

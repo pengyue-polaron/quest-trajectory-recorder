@@ -76,13 +76,21 @@
       },
       "foxglovePanelTitle": "EEF / desired EEF"
     },
-    "RawMessages!quest-telemetry": {
-      "topicPath": "/teleop/telemetry",
-      "diffTopicPath": "",
-      "diffMethod": "custom",
-      "diffEnabled": false,
-      "showFullMessageForDiff": false,
-      "foxglovePanelTitle": "Teleop status / timing / action"
+    "DiagnosticSummary!quest-diagnostics": {
+      "minLevel": 0,
+      "pinnedIds": [],
+      "hardwareIdFilter": "",
+      "topicToRender": "/teleop/diagnostics",
+      "sortByLevel": true,
+      "secondsUntilStale": 3,
+      "foxglovePanelTitle": "System status"
+    },
+    "DiagnosticStatusPanel!quest-workflow": {
+      "topicToRender": "/teleop/diagnostics",
+      "selectedHardwareId": "quest-teleop",
+      "selectedName": "Teleop/Workflow",
+      "splitFraction": 0.32,
+      "foxglovePanelTitle": "Current status and next action"
     },
     "CallService!quest-hold": {
       "serviceName": "/teleop/hold",
@@ -182,7 +190,12 @@
       "first": {
         "direction": "row",
         "first": "3D!quest-eef",
-        "second": "RawMessages!quest-telemetry",
+        "second": {
+          "direction": "column",
+          "first": "DiagnosticSummary!quest-diagnostics",
+          "second": "DiagnosticStatusPanel!quest-workflow",
+          "splitPercentage": 48
+        },
         "splitPercentage": 55
       },
       "second": {

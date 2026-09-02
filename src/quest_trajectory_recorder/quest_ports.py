@@ -6,6 +6,8 @@ import subprocess
 from typing import Any
 
 DEFAULT_GRIPPER_PORT = 8127
+QUEST_PACKAGE = "com.Xigbee.FrankaBot"
+QUEST_ACTIVITY = "com.unity3d.player.UnityPlayerActivity"
 
 
 def setup_adb_reverse(ports: list[int]) -> None:
@@ -24,6 +26,29 @@ def setup_adb_reverse(ports: list[int]) -> None:
         )
 
 
+def adb_reverse_ports() -> set[int]:
+    """Return currently configured device-side ADB reverse TCP ports."""
+    try:
+        result = subprocess.run(
+            ["adb", "reverse", "--list"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return set()
+    ports: set[int] = set()
+    for token in result.stdout.split():
+        if not token.startswith("tcp:"):
+            continue
+        try:
+            ports.add(int(token.removeprefix("tcp:")))
+        except ValueError:
+            continue
+    return ports
+
+
 def adb_connected() -> bool:
     """Return whether one authorized Android / Quest device is reachable."""
     try:
@@ -39,19 +64,79 @@ def adb_connected() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "device"
 
 
-def quest_device_info() -> dict[str, Any]:
-    """Small read-only device diagnostic used in hub status heartbeats."""
+def quest_activity_resumed() -> bool:
+    """Return whether the controller-tracking Unity activity owns XR focus."""
     if not adb_connected():
-        return {"adb_connected": False, "model": None, "serial": None}
-
-    def value(*args: str) -> str | None:
+        return False
+    try:
         result = subprocess.run(
-            ["adb", *args],
+            ["adb", "shell", "dumpsys", "activity", "activities"],
             check=False,
             capture_output=True,
             text=True,
-            timeout=3.0,
+            timeout=5.0,
         )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and any(
+        QUEST_PACKAGE in line and "topResumedActivity" in line
+        for line in result.stdout.splitlines()
+    )
+
+
+def focus_frankabot(*, close_panels: bool = True) -> None:
+    """Restore the installed FrankaBot app without changing its calibration."""
+    if not adb_connected():
+        raise RuntimeError("Quest is not connected through ADB")
+    if close_panels:
+        for package in ("com.oculus.panelapp.library", "com.oculus.store"):
+            subprocess.run(
+                ["adb", "shell", "am", "force-stop", package],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5.0,
+            )
+    subprocess.run(
+        [
+            "adb",
+            "shell",
+            "am",
+            "start",
+            "-n",
+            f"{QUEST_PACKAGE}/{QUEST_ACTIVITY}",
+            "--es",
+            "unity",
+            "-force-gles",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=8.0,
+    )
+
+
+def quest_device_info() -> dict[str, Any]:
+    """Small read-only device diagnostic used in hub status heartbeats."""
+    if not adb_connected():
+        return {
+            "adb_connected": False,
+            "model": None,
+            "serial": None,
+            "app_resumed": False,
+        }
+
+    def value(*args: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["adb", *args],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
         text = result.stdout.strip()
         return text or None
 
@@ -59,4 +144,5 @@ def quest_device_info() -> dict[str, Any]:
         "adb_connected": True,
         "model": value("shell", "getprop", "ro.product.model"),
         "serial": value("get-serialno"),
+        "app_resumed": quest_activity_resumed(),
     }

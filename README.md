@@ -75,6 +75,20 @@ one process group. The organization layout `Quest Unified Teleop` connects to
 `--synthetic`. See [`scripts/README.md`](scripts/README.md) for the intentionally
 small script surface.
 
+After a profile exists, that single command is the complete physical workflow:
+it waits for USB/ADB, configures every reverse port, brings FrankaBot to the
+foreground, starts the source/backend/Foxglove processes, and keeps checking
+ADB and app focus. Put on the headset, pick up the right controller, press `B`
+to clutch, and operate. If USB or controller tracking drops, Cartesian motion
+freezes; reconnect USB or pick up and wave the controller. After six stable
+frames the mapper re-anchors at the current robot pose instead of chasing the
+old controller pose.
+
+Meta may put a controller into `CONNECTED_INACTIVE` when the headset is not
+worn. ADB can still look healthy in that state, but 6DoF input is unavailable.
+Foxglove's native Diagnostics panels distinguish ADB, app focus, controller
+stream, 6DoF tracking, backend feedback, safety recovery, and recording state.
+
 ## Installation
 
 ```bash
@@ -233,6 +247,8 @@ adb shell am start -n com.Xigbee.FrankaBot/com.unity3d.player.UnityPlayerActivit
 
 `scripts/start_frankabot.sh` does this automatically after launch. Use
 `--keep-panels` only if you intentionally want to leave Oculus panels open.
+The tracker hub repeats this recovery after later ADB disconnects or focus
+loss; restarting the whole session is normally unnecessary.
 
 
 ## LIBERO Teleoperation

@@ -8,6 +8,7 @@ INSTALL=1
 LAUNCH=1
 IP="127.0.0.1"
 CLOSE_PANELS=1
+ADB_WAIT_SECONDS=120
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,12 +32,17 @@ while [[ $# -gt 0 ]]; do
       CLOSE_PANELS=0
       shift
       ;;
+    --adb-wait-seconds)
+      ADB_WAIT_SECONDS="$2"
+      shift 2
+      ;;
     -h|--help)
       cat <<'HELP'
-Usage: scripts/start_frankabot.sh [--apk APK] [--ip 127.0.0.1] [--no-install] [--no-launch] [--keep-panels]
+Usage: scripts/start_frankabot.sh [--apk APK] [--ip 127.0.0.1] [--no-install] [--no-launch] [--keep-panels] [--adb-wait-seconds N]
 
 Installs/configures the FrankaBotControllerTracking APK, sets Unity PlayerPrefs
 IP to 127.0.0.1 for ADB reverse mode, forwards ZMQ ports, and launches the app.
+It waits up to 120 seconds for a powered and authorized Quest by default.
 HELP
       exit 0
       ;;
@@ -47,15 +53,33 @@ HELP
   esac
 done
 
+if ! [[ "${ADB_WAIT_SECONDS}" =~ ^[0-9]+$ ]]; then
+  echo "--adb-wait-seconds must be a non-negative integer." >&2
+  exit 2
+fi
+
 if ! command -v adb >/dev/null 2>&1; then
   echo "adb was not found on PATH." >&2
   exit 1
 fi
 
-if ! adb get-state >/dev/null 2>&1; then
-  echo "No Quest/Android device is visible to adb." >&2
-  exit 1
-fi
+adb start-server >/dev/null 2>&1 || true
+WAIT_STARTED="${SECONDS}"
+WAIT_ANNOUNCED=0
+until adb get-state >/dev/null 2>&1; do
+  if (( SECONDS - WAIT_STARTED >= ADB_WAIT_SECONDS )); then
+    echo "Quest did not become available to adb within ${ADB_WAIT_SECONDS}s." >&2
+    echo "Connect USB, wake the headset, and accept the USB debugging prompt." >&2
+    adb devices -l >&2 || true
+    exit 1
+  fi
+  if [[ "${WAIT_ANNOUNCED}" -eq 0 ]]; then
+    echo "Waiting for Quest ADB (connect USB, wake it, and authorize debugging)..."
+    WAIT_ANNOUNCED=1
+  fi
+  sleep 1
+done
+echo "Quest ADB connected: $(adb get-serialno | tr -d '\r')"
 
 if [[ "${INSTALL}" -eq 1 ]]; then
   if [[ ! -f "${APK}" ]]; then

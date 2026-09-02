@@ -10,6 +10,7 @@ from quest_trajectory_recorder.foxglove_bridge import (
     CommandRouter,
     FoxgloveTeleopBridge,
     build_services,
+    diagnostic_array,
     feedback_telemetry,
     foxglove_deep_link,
     pose_message,
@@ -24,6 +25,7 @@ EXPECTED_TOPICS = {
     "/teleop/telemetry",
     "/teleop/target",
     "/teleop/source_status",
+    "/teleop/diagnostics",
 }
 
 
@@ -76,6 +78,68 @@ def test_pose_message_uses_foxglove_vector_position() -> None:
     assert isinstance(message, PoseInFrame)
 
 
+def test_diagnostics_explain_tracking_loss_and_safe_hold() -> None:
+    feedback = TeleopFeedback(
+        backend="robotteambench_maniskill",
+        episode_id="episode-2",
+        frame_index=4,
+        status="holding",
+        target_seq=8,
+        target_age_ms=3.5,
+        gate_open=False,
+        recording=False,
+        eef_position=[0.1, 0.2, 0.3],
+        gripper=-1.0,
+        action=[0.0] * 7,
+        diagnostics={
+            "mapping_reason": "tracking_invalid",
+            "guard_state": "holding",
+            "recovery_frames": 0,
+            "recovery_frames_required": 6,
+            "jump_rejections": 1,
+        },
+    )
+    message = diagnostic_array(
+        timestamp_ns=123,
+        source_status={
+            "state": "tracking_invalid",
+            "adb_connected": True,
+            "app_resumed": True,
+            "controller_stream_online": True,
+            "tracking_valid": False,
+            "gate_open": True,
+            "raw_age_ms": 12.0,
+            "tracking_loss_count": 2,
+            "last_invalid_reason": "zero_position",
+        },
+        source_age_sec=0.1,
+        feedback=feedback,
+        feedback_age_sec=0.02,
+    )
+    statuses = {status["name"]: status for status in message["status"]}
+    assert statuses["Teleop/Workflow"]["level"] == 1
+    assert "tracking invalid" in statuses["Teleop/Workflow"]["message"]
+    assert set(statuses) == {"Teleop/Workflow", "Teleop/Safety"}
+    assert statuses["Teleop/Safety"]["hardware_id"] == "quest-teleop"
+    assert {item["key"] for item in statuses["Teleop/Safety"]["values"]} >= {
+        "Guard",
+        "Rejected jumps",
+    }
+
+
+def test_diagnostics_mark_missing_source_as_stale() -> None:
+    message = diagnostic_array(
+        timestamp_ns=123,
+        source_status=None,
+        source_age_sec=None,
+        feedback=None,
+        feedback_age_sec=None,
+    )
+    workflow = message["status"][0]
+    assert workflow["level"] == 3
+    assert "Robot motion frozen" in workflow["message"]
+
+
 def test_deep_link_selects_organization_layout_and_local_bridge() -> None:
     link = foxglove_deep_link(
         websocket_url="ws://127.0.0.1:8765",
@@ -117,6 +181,12 @@ def test_live_gateway_advertises_only_canonical_topics_and_services() -> None:
     assert {
         channel["topic"] for channel in messages["advertise"]["channels"]
     } == EXPECTED_TOPICS
+    diagnostics_channel = next(
+        channel
+        for channel in messages["advertise"]["channels"]
+        if channel["topic"] == "/teleop/diagnostics"
+    )
+    assert diagnostics_channel["schemaName"] == "diagnostic_msgs/msg/DiagnosticArray"
     assert {
         service["name"] for service in messages["advertiseServices"]["services"]
     } == set(SERVICE_COMMANDS)

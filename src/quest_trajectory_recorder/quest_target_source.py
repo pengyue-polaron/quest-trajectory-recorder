@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import time
+from dataclasses import replace
 
 import zmq
 
@@ -60,6 +62,11 @@ class DirectQuestTargetSource:
         self.invalid_remote_count = 0
         self.latest_target: TeleopTarget | None = None
         self.latest_target_at: float | None = None
+        self.latest_raw_at: float | None = None
+        self.latest_valid_at: float | None = None
+        self.latest_raw_valid: bool | None = None
+        self.tracking_loss_count = 0
+        self.last_invalid_reason: str | None = None
         self.remote_socket = context.socket(zmq.PULL)
         self.remote_socket.setsockopt(zmq.LINGER, 0)
         self.remote_socket.setsockopt(zmq.CONFLATE, 1)
@@ -115,6 +122,7 @@ class DirectQuestTargetSource:
 
     def _update_remote(self, payload: bytes) -> TeleopTarget | None:
         received_monotonic_ns = time.monotonic_ns()
+        self.latest_raw_at = time.monotonic()
         self.raw_remote_count += 1
         try:
             remote = parse_remote_text(
@@ -124,7 +132,53 @@ class DirectQuestTargetSource:
             remote = None
         if not valid_remote(remote):
             self.invalid_remote_count += 1
-            return None
+            reason = "malformed_pose" if remote is None else "zero_or_invalid_pose"
+            if self.latest_raw_valid is True:
+                self.tracking_loss_count += 1
+                self.events.append(
+                    "Controller tracking lost; publishing an immediate safety hold."
+                )
+            self.latest_raw_valid = False
+            self.last_invalid_reason = reason
+            if self.latest_target is None:
+                return None
+            metadata = {
+                **self.latest_target.source_metadata,
+                "tracking_state": "invalid",
+                "tracking_invalid_reason": reason,
+                "raw_remote_count": self.raw_remote_count,
+                "valid_remote_count": self.remote_count,
+                "tracking_loss_count": self.tracking_loss_count,
+            }
+            if remote is not None:
+                for name in ("position", "rotation"):
+                    try:
+                        values = [float(value) for value in remote[name]]
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if all(math.isfinite(value) for value in values):
+                        metadata[f"invalid_raw_{name}"] = values
+            now_ns = time.time_ns()
+            invalid = replace(
+                self.latest_target,
+                seq=self.raw_remote_count,
+                timestamp=now_ns / 1_000_000_000.0,
+                frame_id=self.raw_remote_count,
+                host_received_monotonic_ns=received_monotonic_ns,
+                host_published_unix_ns=now_ns,
+                tracking_valid=False,
+                source_metadata=metadata,
+            )
+            self.latest_target = invalid
+            return invalid
+        recovered = self.latest_raw_valid is False
+        self.latest_raw_valid = True
+        self.latest_valid_at = time.monotonic()
+        self.last_invalid_reason = None
+        if recovered:
+            self.events.append(
+                "Controller pose returned; downstream guard is stabilizing and re-anchoring."
+            )
         flag = bool(remote.get("flag"))
         if self.gate_open:
             if self.gripper_mode == "toggle":
@@ -137,15 +191,25 @@ class DirectQuestTargetSource:
         target = target_from_remote(
             remote,
             calibration=self.calibration,
-            seq=self.remote_count,
+            seq=self.raw_remote_count,
             gripper=self.gripper,
             gate_open=self.gate_open,
             pause_state=self.pause_state,
-            remote_count=self.remote_count,
+            remote_count=self.raw_remote_count,
             session_id=self.session_id,
             received_monotonic_ns=received_monotonic_ns,
             calibration_id=self.calibration_id,
             calibration_sha256=self.calibration_sha256,
+        )
+        target = replace(
+            target,
+            source_metadata={
+                **target.source_metadata,
+                "tracking_state": "valid",
+                "raw_remote_count": self.raw_remote_count,
+                "valid_remote_count": self.remote_count,
+                "tracking_loss_count": self.tracking_loss_count,
+            },
         )
         self.latest_target = target
         self.latest_target_at = target.timestamp

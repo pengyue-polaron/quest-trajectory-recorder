@@ -29,20 +29,21 @@ Panels are not alternate production paths.
 | Module | Role |
 | --- | --- |
 | `receiver.py` | Raw APK text parser and raw CSV capture. |
-| `quest_ports.py` | Quest port constants and ADB reverse helpers. |
+| `quest_ports.py` | Quest port constants plus ADB, reverse-port, and app-focus recovery. |
 | `calibration_profiles.py`, `teleop_frame.py` | Named profile validation and Quest-to-teleop geometry. |
 | `teleop_target.py` | Raw Quest frame to canonical `TeleopTarget`. |
 | `quest_target_source.py` | Raw Quest socket ownership and controller gate/gripper state. |
 | `quest_tracker_hub.py` | Canonical target/status ZMQ publisher. |
 | `synthetic_target.py` | Deterministic canonical source for tests. |
 | `device_doctor.py` | Read-only ADB/APK/port/calibration readiness. |
-| `foxglove_bridge.py` | Canonical ZMQ observer/command client mapped to Foxglove SDK topics/services. |
+| `foxglove_bridge.py` | Canonical ZMQ observer/command client mapped to Foxglove images, native diagnostics, poses, and services. |
 | `live3d.py`, `live3d_web.py` | Quest-only calibration UI and profile writer. |
 | `libero_teleop.py` | Optional LIBERO backend consuming canonical ZMQ only. |
 
-Shared schemas, geometry, and transport are imported directly from
-`embodied_ops.teleop`. This repository contains no compatibility re-export and
-does not accept Quest-prefixed target schemas.
+Shared schemas, geometry, transport, and the source-neutral Cartesian tracking
+guard are imported directly from `embodied_ops.teleop`. This repository
+contains no compatibility re-export and does not accept Quest-prefixed target
+schemas.
 
 ## Repository dependency direction
 

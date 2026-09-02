@@ -10,6 +10,7 @@ PROFILE="${CALIBRATION_PROFILE:-quest_teleop_frame}"
 SYNTHETIC=0
 SYNTHETIC_PATTERN="axes"
 OPEN_FOXGLOVE=1
+ADB_WAIT_SECONDS=120
 TASK=""
 BACKEND_ARGS=()
 
@@ -27,11 +28,13 @@ Options:
   --synthetic-pattern NAME   axes, circle, or hold (default: axes).
   --task NAME                ManiSkill task: cube_sort or bar_carry.
   --scene-seed N             ManiSkill scene seed.
+  --episode-max-steps N      Optional ManiSkill timeout; zero means manual reset only.
   --record                   Start recording immediately.
   --recording-root PATH      Backend recording directory.
   --orientation              Enable controller orientation mapping.
   --max-steps N              Stop after N backend steps (useful for tests).
   --no-open-foxglove         Start the gateway without opening Foxglove Desktop.
+  --adb-wait-seconds N       Wait this long for Quest USB/ADB (default: 120).
   --                         Pass remaining arguments directly to the backend.
 
 Examples:
@@ -64,7 +67,7 @@ while [[ $# -gt 0 ]]; do
       BACKEND_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --scene-seed|--recording-root|--max-steps)
+    --scene-seed|--recording-root|--max-steps|--episode-max-steps)
       BACKEND_ARGS+=("$1" "$2")
       shift 2
       ;;
@@ -75,6 +78,10 @@ while [[ $# -gt 0 ]]; do
     --no-open-foxglove)
       OPEN_FOXGLOVE=0
       shift
+      ;;
+    --adb-wait-seconds)
+      ADB_WAIT_SECONDS="$2"
+      shift 2
       ;;
     --)
       shift
@@ -128,7 +135,9 @@ cleanup() {
     wait "$pid" >/dev/null 2>&1 || true
   done
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cd "$ROOT"
 if [[ "$SYNTHETIC" -eq 1 ]]; then
@@ -143,7 +152,8 @@ else
     echo "Create it with scripts/run_calibration.sh $PROFILE" >&2
     exit 1
   fi
-  "$ROOT/scripts/start_frankabot.sh" --no-install
+  "$ROOT/scripts/start_frankabot.sh" --no-install \
+    --adb-wait-seconds "$ADB_WAIT_SECONDS"
   "$ROOT/scripts/run_quest_doctor.sh" --calibration "$CALIBRATION_PATH"
   "$ROOT/scripts/run_quest_tracker_hub.sh" --profile "$PROFILE" &
   CHILD_PIDS+=("$!")
@@ -181,7 +191,15 @@ echo "Quest teleop session: source=$SOURCE_LABEL backend=$BACKEND"
 echo "Foxglove: ws://127.0.0.1:8765 (layout: Quest Unified Teleop)"
 
 if [[ "${#BACKEND_ARGS[@]}" -gt 0 ]]; then
-  "$BACKEND_LAUNCHER" "${BACKEND_ARGS[@]}"
+  "$BACKEND_LAUNCHER" "${BACKEND_ARGS[@]}" &
 else
-  "$BACKEND_LAUNCHER"
+  "$BACKEND_LAUNCHER" &
 fi
+BACKEND_PID="$!"
+CHILD_PIDS+=("$BACKEND_PID")
+if wait "$BACKEND_PID"; then
+  BACKEND_STATUS=0
+else
+  BACKEND_STATUS="$?"
+fi
+exit "$BACKEND_STATUS"

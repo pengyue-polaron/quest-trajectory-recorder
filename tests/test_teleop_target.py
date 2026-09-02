@@ -10,7 +10,11 @@ from quest_trajectory_recorder.teleop_frame import (
     quest_pos_to_teleop,
     quest_rotation_to_teleop_matrix,
 )
-from quest_trajectory_recorder.teleop_target import TeleopTarget, target_from_remote
+from quest_trajectory_recorder.teleop_target import (
+    TeleopTarget,
+    target_from_remote,
+    valid_remote,
+)
 
 
 def test_quest_calibration_maps_origin_relative_axes(tmp_path: Path):
@@ -55,6 +59,19 @@ def test_target_from_remote_round_trips_json():
     assert decoded.controller_id == "right"
     assert decoded.frame_id == 11
     assert decoded.host_received_monotonic_ns is not None
+
+
+def test_remote_validation_rejects_zero_nonfinite_and_invalid_rotation():
+    assert valid_remote({"position": [0.1, 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 1.0]})
+    assert not valid_remote(
+        {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]}
+    )
+    assert not valid_remote(
+        {"position": [float("nan"), 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 1.0]}
+    )
+    assert not valid_remote(
+        {"position": [0.1, 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 0.0]}
+    )
 
 
 def test_target_decoder_rejects_payload_without_canonical_schema():

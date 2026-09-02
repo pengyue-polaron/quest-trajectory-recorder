@@ -3,7 +3,8 @@
 ## Primary workflow
 
 - `run_quest_session.sh`: the only maintained ManiSkill/MuJoCo collection
-  launcher. It owns source, backend, Foxglove gateway, and cleanup.
+  launcher. It waits for Quest ADB, owns source/backend/Foxglove, restores the
+  Quest stream after reconnects, and cleans up the whole process group.
 - `run_calibration.sh`: open the Quest-only calibration page and save a named
   profile before physical collection.
 
@@ -11,7 +12,8 @@
 
 - `setup.sh`: install the Quest tools and the canonical `embodied-ops` ZMQ
   dependency.
-- `start_frankabot.sh`: install/start or re-focus the recovered Quest APK.
+- `start_frankabot.sh`: wait for ADB, install/start or re-focus the recovered
+  Quest APK, and configure all reverse ports.
 - `run_quest_doctor.sh`: read-only ADB/APK/reverse-port/calibration checks.
 
 ## Low-level components
