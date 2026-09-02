@@ -663,12 +663,13 @@ class FoxgloveTeleopBridge:
             log_time=timestamp_ns,
         )
         if feedback.desired_eef_position is not None:
+            desired_orientation = feedback.desired_eef_orientation_xyzw or orientation
             self.desired_eef_pose_channel.log(
                 pose_message(
                     timestamp_ns=timestamp_ns,
                     frame_id="teleop_world",
                     position=feedback.desired_eef_position,
-                    quaternion_xyzw=orientation,
+                    quaternion_xyzw=desired_orientation,
                 ),
                 log_time=timestamp_ns,
             )
