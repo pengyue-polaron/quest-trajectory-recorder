@@ -5,12 +5,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import queue
 import signal
 import subprocess
+import threading
 import time
 import uuid
-from dataclasses import replace
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import zmq
 from embodied_ops.teleop.zmq_transport import (
@@ -31,6 +35,126 @@ from .quest_ports import (
 from .quest_target_source import DirectQuestTargetSource
 from .receiver import DEFAULT_PORTS
 from .teleop_frame import load_quest_calibration
+
+_DISCONNECTED_DEVICE = {
+    "adb_connected": False,
+    "model": None,
+    "serial": None,
+    "app_resumed": False,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class _AdbHealthUpdate:
+    device: dict[str, Any]
+    events: tuple[str, ...]
+
+
+class _AdbHealthMonitor:
+    """Run slow ADB recovery checks away from the target-ingest thread."""
+
+    def __init__(
+        self,
+        *,
+        required_ports: list[int],
+        check_sec: float,
+        manage_app: bool,
+        app_refocus_sec: float,
+        initial_device: dict[str, Any],
+        connected_fn: Callable[[], bool] = adb_connected,
+        reverse_ports_fn: Callable[[], set[int]] = adb_reverse_ports,
+        setup_reverse_fn: Callable[[list[int]], None] = setup_adb_reverse,
+        focus_fn: Callable[[], None] = focus_frankabot,
+        device_info_fn: Callable[[], dict[str, Any]] = quest_device_info,
+    ) -> None:
+        if check_sec <= 0:
+            raise ValueError("ADB health-check interval must be positive")
+        self.required_ports = tuple(int(port) for port in required_ports)
+        self.check_sec = float(check_sec)
+        self.manage_app = bool(manage_app)
+        self.app_refocus_sec = float(app_refocus_sec)
+        self._connected_fn = connected_fn
+        self._reverse_ports_fn = reverse_ports_fn
+        self._setup_reverse_fn = setup_reverse_fn
+        self._focus_fn = focus_fn
+        self._device_info_fn = device_info_fn
+        self._previous_connected = bool(initial_device.get("adb_connected"))
+        self._last_app_refocus_at = 0.0
+        self._updates: queue.SimpleQueue[_AdbHealthUpdate] = queue.SimpleQueue()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="quest-adb-health",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def close(self) -> None:
+        self._stop.set()
+        # ADB is external to this process and may itself be wedged during USB
+        # teardown. The worker is a daemon and owns no ZMQ sockets, so cleanup
+        # must not wait forever for an uninterruptible platform-tools call.
+        self._thread.join(timeout=2.0)
+
+    def take_updates(self) -> list[_AdbHealthUpdate]:
+        updates: list[_AdbHealthUpdate] = []
+        while True:
+            try:
+                updates.append(self._updates.get_nowait())
+            except queue.Empty:
+                return updates
+
+    def _check_once(self, now: float) -> _AdbHealthUpdate:
+        events: list[str] = []
+        connected = self._connected_fn()
+        if connected:
+            try:
+                missing_ports = sorted(
+                    set(self.required_ports) - self._reverse_ports_fn()
+                )
+                if missing_ports:
+                    self._setup_reverse_fn(missing_ports)
+                    events.append(f"ADB reverse mappings restored: {missing_ports}")
+                if not self._previous_connected and self.manage_app:
+                    self._focus_fn()
+                    self._last_app_refocus_at = now
+                    events.append("FrankaBot refocused after ADB reconnect.")
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                connected = False
+        if connected != self._previous_connected:
+            events.append(
+                f"ADB device {'connected' if connected else 'disconnected'}."
+            )
+        self._previous_connected = connected
+
+        try:
+            device = self._device_info_fn()
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            device = dict(_DISCONNECTED_DEVICE)
+        if (
+            connected
+            and self.manage_app
+            and not device.get("app_resumed")
+            and now - self._last_app_refocus_at >= self.app_refocus_sec
+        ):
+            try:
+                self._focus_fn()
+                self._last_app_refocus_at = now
+                device = self._device_info_fn()
+                events.append("FrankaBot lost focus and was restored.")
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                pass
+        return _AdbHealthUpdate(device=dict(device), events=tuple(events))
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            started = time.monotonic()
+            self._updates.put(self._check_once(started))
+            remaining = max(0.0, self.check_sec - (time.monotonic() - started))
+            if self._stop.wait(remaining):
+                return
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +184,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--allow-initial-high", action="store_true")
     parser.add_argument("--gripper-mode", choices=("toggle", "hold"), default="toggle")
+    parser.add_argument(
+        "--tracking-loss-grace-ms",
+        type=float,
+        default=120.0,
+        help="Ignore isolated invalid Quest pose placeholders for this long before holding.",
+    )
     parser.add_argument("--target-bind", default=DEFAULT_TARGET_ENDPOINT)
     parser.add_argument("--print-every", type=int, default=30)
     parser.add_argument("--session-id", default="")
@@ -75,16 +205,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    required_ports = [
+        args.remote_port,
+        args.pause_port,
+        args.resolution_port,
+        args.gripper_port,
+    ]
     if args.adb_reverse:
         if adb_connected():
-            setup_adb_reverse(
-                [
-                    args.remote_port,
-                    args.pause_port,
-                    args.resolution_port,
-                    args.gripper_port,
-                ]
-            )
+            setup_adb_reverse(required_ports)
             if not args.no_manage_app and not quest_activity_resumed():
                 focus_frankabot()
         else:
@@ -124,11 +253,10 @@ def main() -> int:
         session_id=session_id,
         calibration_id=calibration_id,
         calibration_sha256=calibration_sha256,
+        tracking_loss_grace_ms=args.tracking_loss_grace_ms,
     )
     stop = False
     last_status_at = 0.0
-    last_adb_check_at = 0.0
-    last_app_refocus_at = 0.0
     device = (
         quest_device_info()
         if args.adb_reverse
@@ -139,7 +267,17 @@ def main() -> int:
             "app_resumed": None,
         }
     )
-    previous_adb_connected = bool(device["adb_connected"])
+    adb_monitor = (
+        _AdbHealthMonitor(
+            required_ports=required_ports,
+            check_sec=args.adb_check_sec,
+            manage_app=not args.no_manage_app,
+            app_refocus_sec=args.app_refocus_sec,
+            initial_device=device,
+        )
+        if args.adb_reverse and args.adb_check_sec > 0
+        else None
+    )
 
     def handle_signal(_signum: int, _frame: object) -> None:
         nonlocal stop
@@ -147,6 +285,8 @@ def main() -> int:
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+    if adb_monitor is not None:
+        adb_monitor.start()
     print(
         f"Publishing TeleopTarget on {args.target_bind} "
         f"topic={DEFAULT_TARGET_TOPIC.decode('ascii')!r}",
@@ -195,58 +335,11 @@ def main() -> int:
                 )
 
             now = time.monotonic()
-            if (
-                args.adb_reverse
-                and args.adb_check_sec > 0
-                and now - last_adb_check_at >= args.adb_check_sec
-            ):
-                connected = adb_connected()
-                if connected:
-                    try:
-                        required_ports = [
-                            args.remote_port,
-                            args.pause_port,
-                            args.resolution_port,
-                            args.gripper_port,
-                        ]
-                        missing_ports = sorted(
-                            set(required_ports) - adb_reverse_ports()
-                        )
-                        if missing_ports:
-                            setup_adb_reverse(missing_ports)
-                            print(
-                                f"ADB reverse mappings restored: {missing_ports}",
-                                flush=True,
-                            )
-                        if not previous_adb_connected and not args.no_manage_app:
-                            focus_frankabot()
-                            last_app_refocus_at = now
-                            print(
-                                "FrankaBot refocused after ADB reconnect.", flush=True
-                            )
-                    except (OSError, RuntimeError, subprocess.SubprocessError):
-                        connected = False
-                if connected != previous_adb_connected:
-                    print(
-                        f"ADB device {'connected' if connected else 'disconnected'}.",
-                        flush=True,
-                    )
-                previous_adb_connected = connected
-                device = quest_device_info()
-                if (
-                    connected
-                    and not args.no_manage_app
-                    and not device.get("app_resumed")
-                    and now - last_app_refocus_at >= args.app_refocus_sec
-                ):
-                    try:
-                        focus_frankabot()
-                        last_app_refocus_at = now
-                        device = quest_device_info()
-                        print("FrankaBot lost focus and was restored.", flush=True)
-                    except (OSError, RuntimeError, subprocess.SubprocessError):
-                        pass
-                last_adb_check_at = now
+            if adb_monitor is not None:
+                for update in adb_monitor.take_updates():
+                    device = update.device
+                    for event in update.events:
+                        print(event, flush=True)
 
             if (
                 args.status_every_sec > 0
@@ -310,6 +403,8 @@ def main() -> int:
                     "raw_remote_count": source.raw_remote_count,
                     "invalid_remote_count": source.invalid_remote_count,
                     "tracking_loss_count": source.tracking_loss_count,
+                    "consecutive_invalid_count": source.consecutive_invalid_count,
+                    "tracking_loss_grace_ms": source.tracking_loss_grace_ms,
                     "last_invalid_reason": source.last_invalid_reason,
                     "calibration_id": calibration_id,
                     "calibration_sha256": calibration_sha256,
@@ -320,6 +415,8 @@ def main() -> int:
                 )
                 last_status_at = now
     finally:
+        if adb_monitor is not None:
+            adb_monitor.close()
         source.close()
         publisher.close()
         context.term()

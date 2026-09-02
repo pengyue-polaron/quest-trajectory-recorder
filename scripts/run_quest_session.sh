@@ -10,6 +10,7 @@ PROFILE="${CALIBRATION_PROFILE:-quest_teleop_frame}"
 SYNTHETIC=0
 SYNTHETIC_PATTERN="axes"
 OPEN_FOXGLOVE=1
+FOXGLOVE_URL="ws://127.0.0.1:8765"
 ADB_WAIT_SECONDS=120
 TASK=""
 BACKEND_ARGS=()
@@ -168,27 +169,32 @@ fi
 FOXGLOVE_PID="$!"
 CHILD_PIDS+=("$FOXGLOVE_PID")
 
+FOXGLOVE_READY=0
 for _attempt in {1..50}; do
   if ! kill -0 "$FOXGLOVE_PID" >/dev/null 2>&1; then
     echo "Foxglove gateway exited during startup." >&2
     exit 1
   fi
-  if "$ROOT/.venv/bin/python" -c \
-    'import socket; s=socket.create_connection(("127.0.0.1", 8765), 0.1); s.close()' \
-    >/dev/null 2>&1; then
-    break
+  if "$ROOT/.venv/bin/python" -m quest_trajectory_recorder.foxglove_probe \
+    --url "$FOXGLOVE_URL" --timeout-sec 0.2 >/dev/null 2>&1; then
+    if kill -0 "$FOXGLOVE_PID" >/dev/null 2>&1; then
+      FOXGLOVE_READY=1
+      break
+    fi
   fi
   sleep 0.1
 done
-if ! "$ROOT/.venv/bin/python" -c \
-  'import socket; s=socket.create_connection(("127.0.0.1", 8765), 0.2); s.close()' \
-  >/dev/null 2>&1; then
-  echo "Foxglove gateway did not become ready on ws://127.0.0.1:8765." >&2
+if [[ "$FOXGLOVE_READY" -ne 1 ]]; then
+  if ! kill -0 "$FOXGLOVE_PID" >/dev/null 2>&1; then
+    echo "Foxglove gateway exited during startup." >&2
+  else
+    echo "Foxglove gateway did not complete a protocol handshake on $FOXGLOVE_URL." >&2
+  fi
   exit 1
 fi
 
 echo "Quest teleop session: source=$SOURCE_LABEL backend=$BACKEND"
-echo "Foxglove: ws://127.0.0.1:8765 (layout: Quest Unified Teleop)"
+echo "Foxglove: $FOXGLOVE_URL (layout: Quest Unified Teleop)"
 
 if [[ "${#BACKEND_ARGS[@]}" -gt 0 ]]; then
   "$BACKEND_LAUNCHER" "${BACKEND_ARGS[@]}" &

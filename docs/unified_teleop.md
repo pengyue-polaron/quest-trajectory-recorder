@@ -14,12 +14,18 @@ Quest APK -> tracker hub -> embodied.teleop_target/v1 (ZMQ PUB 8130)
                     Foxglove Quest Unified Teleop
 
 Foxglove services -> command/result (ZMQ DEALER/ROUTER 8132) -> backend
+
+Quest calibration page (pre-collection only): http://127.0.0.1:8766
 ```
 
 Foxglove is the only collection UI. The calibration browser is deliberately
 separate because it edits a Quest-owned calibration profile before collection;
 it never controls a simulator. There is no MJPEG dashboard, Operator Panel, or
 stdin command path in the maintained stack.
+
+Both maintained simulator backends use a `1.4x` translation scale by default
+for a more direct controller feel. Pass `-- --position-scale VALUE` to the
+unified launcher when a task needs a different reach-to-motion ratio.
 
 ## One-time setup
 
@@ -36,6 +42,9 @@ Create one profile for each physical setup:
 ```bash
 scripts/run_calibration.sh desk
 ```
+
+The calibration page uses `http://127.0.0.1:8766`; it never shares
+Foxglove's collection port.
 
 Then start one complete session:
 
@@ -108,7 +117,10 @@ axes, tracking focus, B-button clutch, trigger, or calibration.
 
 ## Foxglove surface
 
-The official SDK gateway listens at `ws://127.0.0.1:8765`. The organization
+The official SDK gateway listens exclusively at `ws://127.0.0.1:8765`. The
+session launcher requires a Foxglove-protocol handshake before starting the
+backend, so an unrelated HTTP listener cannot be mistaken for a ready gateway.
+The organization
 layout is `Quest Unified Teleop` (`lay_0eaTLQSSPmExnWfB`); its versioned export
 is `foxglove/quest_teleop.foxglove-layout.json`.
 
@@ -135,11 +147,11 @@ Every service waits for an `embodied.teleop_command_result/v1` response. The
 backend remains the safety authority and duplicate request IDs are never
 applied twice.
 
-The default layout renders `/teleop/diagnostics` with Foxglove's Diagnostics
-Summary and Diagnostic Detail panels. `Teleop/Workflow` gives one plain-language
-state plus the next operator action. `Teleop/Safety` carries only the guard
-evidence needed to explain a hold or recovery. Raw JSON topics remain available
-for engineering plots but are not part of the operator layout.
+The default layout renders `/teleop/diagnostics` with one native Diagnostic
+Detail panel. `Teleop/Controller` shows exactly the B-button streaming state,
+live controller pose, and Quest-online state. Its headline distinguishes a
+paused stream, tracking loss, stale pose, and stalled backend. Raw JSON topics
+remain available for engineering plots but are not part of the operator layout.
 
 Interactive ManiSkill collection disables the environment's registered
 700-step timeout. A completed or explicitly timed episode enters Hold and waits

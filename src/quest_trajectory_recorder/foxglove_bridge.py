@@ -138,22 +138,6 @@ DIAGNOSTIC_STALE = 3
 _SOURCE_STALE_SEC = 2.5
 _BACKEND_STALE_SEC = 1.0
 
-_REASON_LABELS = {
-    "active": "Following normally",
-    "initializing": "Waiting for the first target",
-    "operator_hold": "Held from Foxglove",
-    "gate_closed": "B-button clutch is off",
-    "tracking_invalid": "Controller 6DoF tracking is invalid",
-    "stale_target": "Controller data timed out",
-    "input_gap": "Verifying recovery after a stream gap",
-    "position_jump": "Rejected a tracking reacquisition jump",
-    "rotation_jump": "Rejected a rotation jump",
-    "session_changed": "Quest session changed; re-anchoring",
-    "recovering": "Waiting for stable recovery frames",
-    "episode_finished": "Episode finished; waiting for an operator command",
-}
-
-
 def _display(value: Any, *, none: str = "—") -> str:
     if value is None:
         return none
@@ -188,15 +172,23 @@ def diagnostic_array(
     timestamp_ns: int,
     source_status: dict[str, Any] | None,
     source_age_sec: float | None,
+    target: TeleopTarget | None,
+    target_age_sec: float | None,
     feedback: TeleopFeedback | None,
     feedback_age_sec: float | None,
 ) -> dict[str, Any]:
-    """Build human-readable ROS diagnostics for Foxglove's native panels."""
-    source_stale = (
-        source_status is None
-        or source_age_sec is None
-        or source_age_sec > _SOURCE_STALE_SEC
+    """Build one compact operator status for Foxglove's Diagnostics panel."""
+    target_fresh = (
+        target is not None
+        and target_age_sec is not None
+        and target_age_sec <= 0.5
     )
+    status_fresh = bool(
+        source_status is not None
+        and source_age_sec is not None
+        and source_age_sec <= _SOURCE_STALE_SEC
+    )
+    source_stale = not target_fresh and not status_fresh
     feedback_stale = (
         feedback is None
         or feedback_age_sec is None
@@ -205,131 +197,91 @@ def diagnostic_array(
     source = source_status or {}
     diagnostics = {} if feedback is None else feedback.diagnostics
     reason = str(diagnostics.get("mapping_reason", diagnostics.get("guard_reason", "")))
-    guard_state = str(diagnostics.get("guard_state", ""))
     synthetic_source = source.get("source") == "synthetic"
-    tracking_valid = synthetic_source or bool(source.get("tracking_valid"))
-    stream_online = synthetic_source or bool(source.get("controller_stream_online"))
-    adb_online = synthetic_source or bool(source.get("adb_connected"))
-    app_resumed = synthetic_source or bool(source.get("app_resumed"))
-    backend_ready = not feedback_stale
-    gate_open = bool(
-        feedback.gate_open
-        if backend_ready and feedback is not None
-        else source.get("gate_open")
+    tracking_valid = synthetic_source or bool(
+        target.tracking_valid
+        if target_fresh and target is not None
+        else status_fresh and source.get("tracking_valid")
     )
-    motion_active = bool(
-        backend_ready
-        and feedback is not None
-        and feedback.gate_open
-        and reason == "active"
+    stream_online = synthetic_source or target_fresh or bool(
+        status_fresh and source.get("controller_stream_online")
+    )
+    adb_online = synthetic_source or target_fresh or bool(
+        status_fresh and source.get("adb_connected")
+    )
+    app_resumed = synthetic_source or target_fresh or bool(
+        status_fresh and source.get("app_resumed")
+    )
+    gate_known = target_fresh or status_fresh
+    gate_open = bool(
+        target.gate_open if target_fresh and target is not None else source.get("gate_open")
     )
 
     if source_stale:
-        workflow_level = DIAGNOSTIC_STALE
-        workflow_message = "Quest status heartbeat lost · Robot motion frozen"
-        workflow_hint = "Check USB/ADB, then pick up and wave the right controller"
+        level = DIAGNOSTIC_STALE
+        message = "Quest offline"
     elif not adb_online:
-        workflow_level = DIAGNOSTIC_ERROR
-        workflow_message = "Quest ADB disconnected · Robot motion frozen"
-        workflow_hint = "Reconnect USB; ports and the Quest app recover automatically"
+        level = DIAGNOSTIC_ERROR
+        message = "Quest offline"
     elif not app_resumed:
-        workflow_level = DIAGNOSTIC_WARN
-        workflow_message = "Quest app lost focus · Recovering automatically"
-        workflow_hint = "Keep Quest awake while FrankaBot returns to the foreground"
+        level = DIAGNOSTIC_WARN
+        message = "Quest app not active"
     elif not stream_online:
-        workflow_level = DIAGNOSTIC_WARN
-        workflow_message = "Right controller offline · Robot motion frozen"
-        workflow_hint = "Wear Quest, pick up the right controller, and wave it"
+        level = DIAGNOSTIC_WARN
+        message = "Controller offline"
+    elif not gate_open:
+        level = DIAGNOSTIC_WARN
+        message = "Paused — press B to stream"
+    elif not target_fresh:
+        level = DIAGNOSTIC_STALE
+        message = "Controller pose stale"
     elif not tracking_valid:
-        workflow_level = DIAGNOSTIC_WARN
-        workflow_message = "Right controller tracking invalid · Robot motion frozen"
-        workflow_hint = "Move the controller into headset view until 6DoF recovers"
+        level = DIAGNOSTIC_WARN
+        message = "Controller tracking unavailable"
     elif feedback_stale:
-        workflow_level = DIAGNOSTIC_STALE
-        workflow_message = "Simulation backend silent · Robot motion frozen"
-        workflow_hint = "Check the launch terminal for a ManiSkill/MuJoCo error"
+        level = DIAGNOSTIC_STALE
+        message = "Streaming — backend not responding"
     elif feedback is not None and feedback.status == "episode_finished":
-        workflow_level = DIAGNOSTIC_WARN
-        workflow_message = "Episode finished · Waiting for an operator command"
-        workflow_hint = "Click Reset, Next, or Previous to load an episode"
+        level = DIAGNOSTIC_WARN
+        message = "Streaming — episode finished"
     elif reason and reason != "active":
-        workflow_level = DIAGNOSTIC_WARN
-        workflow_message = "Safety hold · Robot motion frozen"
-        workflow_hint = "Hold steady; recovery re-anchors at the current robot pose"
-    elif not gate_open or not motion_active:
-        workflow_level = DIAGNOSTIC_WARN
-        workflow_message = "System online · Waiting for the B-button clutch"
-        workflow_hint = (
-            "Press B on the right controller; operate when the state turns OK"
-        )
+        level = DIAGNOSTIC_WARN
+        message = "Streaming — control stabilizing"
     else:
-        workflow_level = DIAGNOSTIC_OK
-        workflow_message = "Ready to operate · Quest controls robot motion"
-        workflow_hint = "Release the clutch or click HOLD to freeze motion immediately"
+        level = DIAGNOSTIC_OK
+        message = "Streaming"
 
     if synthetic_source:
-        input_status = "Synthetic test source online"
-    elif source_stale:
-        input_status = "Quest heartbeat missing"
-    elif not adb_online:
-        input_status = "Quest ADB offline"
-    elif not app_resumed:
-        input_status = "FrankaBot not in foreground"
-    elif not stream_online:
-        input_status = "Right controller offline"
-    elif not tracking_valid:
-        input_status = "Right controller 6DoF invalid"
+        quest_label = "SYNTHETIC"
+    elif source_stale or not adb_online:
+        quest_label = "OFFLINE"
     else:
-        input_status = "Quest and right controller online"
+        quest_label = "ONLINE"
 
-    if feedback_stale:
-        safety_level, safety_message = DIAGNOSTIC_STALE, "No backend guard data"
-    elif reason == "active":
-        safety_level, safety_message = DIAGNOSTIC_OK, "Guard healthy"
+    if not gate_known:
+        streaming_label = "UNKNOWN"
+    elif gate_open:
+        streaming_label = "ON · B pressed"
     else:
-        safety_level = DIAGNOSTIC_WARN
-        safety_message = _REASON_LABELS.get(
-            reason, reason or "Waiting for guarded target"
-        )
-    safety_values: list[tuple[str, Any]] = [
-        ("Guard", guard_state or reason),
-        ("Target age (ms)", None if feedback is None else feedback.target_age_ms),
-        ("Rejected jumps", diagnostics.get("jump_rejections")),
-    ]
-    if reason in {"recovering", "input_gap", "position_jump", "rotation_jump"}:
-        safety_values.append(
-            (
-                "Recovery frames",
-                "{}/{}".format(
-                    _display(diagnostics.get("recovery_frames")),
-                    _display(diagnostics.get("recovery_frames_required")),
-                ),
-            )
-        )
-    if diagnostics.get("guard_reanchored"):
-        safety_values.append(("Re-anchored", True))
+        streaming_label = "PAUSED · B released"
+
+    if target_fresh and target is not None and target.tracking_valid:
+        x, y, z = target.position
+        position_label = f"x {x:+.3f}  y {y:+.3f}  z {z:+.3f}"
+    else:
+        position_label = "Unavailable"
 
     statuses = [
         _diagnostic_status(
-            "Teleop/Workflow",
-            workflow_level,
-            workflow_message,
+            "Teleop/Controller",
+            level,
+            message,
             [
-                ("Next action", workflow_hint),
-                ("Input", input_status),
-                ("Backend", None if feedback is None else feedback.backend),
-                (
-                    "Recording",
-                    "Recording" if feedback and feedback.recording else "Not recording",
-                ),
+                ("Streaming", streaming_label),
+                ("Controller pose (m)", position_label),
+                ("Quest online", quest_label),
             ],
-        ),
-        _diagnostic_status(
-            "Teleop/Safety",
-            safety_level,
-            safety_message,
-            safety_values,
-        ),
+        )
     ]
     return {
         "header": {
@@ -574,6 +526,8 @@ class FoxgloveTeleopBridge:
         self.forwarded_targets = 0
         self.latest_source_status: dict[str, Any] | None = None
         self.latest_source_at: float | None = None
+        self.latest_target: TeleopTarget | None = None
+        self.latest_target_at: float | None = None
         self.latest_feedback: TeleopFeedback | None = None
         self.latest_feedback_at: float | None = None
         self.last_diagnostics_at = 0.0
@@ -609,6 +563,8 @@ class FoxgloveTeleopBridge:
                 self.tracker_channel.log(value, log_time=timestamp_ns)
             elif topic == DEFAULT_TARGET_TOPIC and isinstance(value, dict):
                 target = TeleopTarget.from_dict(value)
+                self.latest_target = target
+                self.latest_target_at = time.monotonic()
                 timestamp_ns = target.host_published_unix_ns or timestamp_ns
                 self.target_channel.log(target.to_dict(), log_time=timestamp_ns)
                 self.target_pose_channel.log(
@@ -688,6 +644,12 @@ class FoxgloveTeleopBridge:
                 None
                 if self.latest_source_at is None
                 else max(0.0, now - self.latest_source_at)
+            ),
+            target=self.latest_target,
+            target_age_sec=(
+                None
+                if self.latest_target_at is None
+                else max(0.0, now - self.latest_target_at)
             ),
             feedback=self.latest_feedback,
             feedback_age_sec=(

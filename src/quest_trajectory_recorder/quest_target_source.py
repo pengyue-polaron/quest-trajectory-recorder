@@ -40,7 +40,10 @@ class DirectQuestTargetSource:
         session_id: str = "unspecified",
         calibration_id: str | None = None,
         calibration_sha256: str | None = None,
+        tracking_loss_grace_ms: float = 120.0,
     ) -> None:
+        if not math.isfinite(tracking_loss_grace_ms) or tracking_loss_grace_ms < 0:
+            raise ValueError("tracking_loss_grace_ms must be finite and non-negative")
         self.context = context
         self.calibration = calibration
         self.no_gate = no_gate
@@ -50,6 +53,7 @@ class DirectQuestTargetSource:
         self.session_id = session_id
         self.calibration_id = calibration_id
         self.calibration_sha256 = calibration_sha256
+        self.tracking_loss_grace_ms = float(tracking_loss_grace_ms)
         self.events: list[str] = []
         self.pause_state: str | None = None
         self.gate_open = bool(no_gate)
@@ -67,6 +71,8 @@ class DirectQuestTargetSource:
         self.latest_raw_valid: bool | None = None
         self.tracking_loss_count = 0
         self.last_invalid_reason: str | None = None
+        self.consecutive_invalid_count = 0
+        self.invalid_started_monotonic_ns: int | None = None
         self.remote_socket = context.socket(zmq.PULL)
         self.remote_socket.setsockopt(zmq.LINGER, 0)
         self.remote_socket.setsockopt(zmq.CONFLATE, 1)
@@ -120,9 +126,18 @@ class DirectQuestTargetSource:
         elif was_open and not self.gate_open:
             self.events.append("Teleop clutch released; robot holds position.")
 
-    def _update_remote(self, payload: bytes) -> TeleopTarget | None:
-        received_monotonic_ns = time.monotonic_ns()
-        self.latest_raw_at = time.monotonic()
+    def _update_remote(
+        self,
+        payload: bytes,
+        *,
+        received_monotonic_ns: int | None = None,
+    ) -> TeleopTarget | None:
+        received_monotonic_ns = (
+            time.monotonic_ns()
+            if received_monotonic_ns is None
+            else received_monotonic_ns
+        )
+        self.latest_raw_at = received_monotonic_ns / 1_000_000_000.0
         self.raw_remote_count += 1
         try:
             remote = parse_remote_text(
@@ -133,19 +148,36 @@ class DirectQuestTargetSource:
         if not valid_remote(remote):
             self.invalid_remote_count += 1
             reason = "malformed_pose" if remote is None else "zero_or_invalid_pose"
+            self.last_invalid_reason = reason
+            self.consecutive_invalid_count += 1
+            if self.invalid_started_monotonic_ns is None:
+                self.invalid_started_monotonic_ns = received_monotonic_ns
+            invalid_duration_ms = (
+                received_monotonic_ns - self.invalid_started_monotonic_ns
+            ) / 1_000_000.0
+            if self.latest_target is None:
+                self.latest_raw_valid = False
+                return None
+            if invalid_duration_ms < self.tracking_loss_grace_ms:
+                # The recovered APK occasionally emits one or two exact-origin
+                # placeholders between valid 6DoF frames. The calibration page
+                # already drops those packets. Keep the last absolute target
+                # during the same short grace window so collection behaves the
+                # same way, while the backend's stale-target watchdog remains
+                # the final safety bound.
+                return None
             if self.latest_raw_valid is True:
                 self.tracking_loss_count += 1
                 self.events.append(
                     "Controller tracking lost; publishing an immediate safety hold."
                 )
             self.latest_raw_valid = False
-            self.last_invalid_reason = reason
-            if self.latest_target is None:
-                return None
             metadata = {
                 **self.latest_target.source_metadata,
                 "tracking_state": "invalid",
                 "tracking_invalid_reason": reason,
+                "tracking_invalid_duration_ms": invalid_duration_ms,
+                "consecutive_invalid_count": self.consecutive_invalid_count,
                 "raw_remote_count": self.raw_remote_count,
                 "valid_remote_count": self.remote_count,
                 "tracking_loss_count": self.tracking_loss_count,
@@ -171,10 +203,12 @@ class DirectQuestTargetSource:
             )
             self.latest_target = invalid
             return invalid
-        recovered = self.latest_raw_valid is False
+        recovered = self.latest_raw_valid is False and self.remote_count > 0
         self.latest_raw_valid = True
         self.latest_valid_at = time.monotonic()
         self.last_invalid_reason = None
+        self.consecutive_invalid_count = 0
+        self.invalid_started_monotonic_ns = None
         if recovered:
             self.events.append(
                 "Controller pose returned; downstream guard is stabilizing and re-anchoring."

@@ -7,6 +7,7 @@ does not implement ManiSkill or MuJoCo control policy.
 
 ```text
 raw Quest APK ports
+  -> calibration browser on HTTP 8766 (pre-collection only)
   -> Quest parser + named calibration
   -> embodied.teleop_target/v1 on ZMQ 8130
   -> backend-owned mapper/safety/recorder
@@ -20,7 +21,8 @@ Foxglove service
   -> Foxglove service response
 ```
 
-The calibration browser is source-owned and exists only before collection.
+The calibration browser is source-owned, listens on HTTP 8766 by default, and
+exists only before collection. Port 8765 is reserved for Foxglove WebSocket.
 Foxglove is the sole collection UI. The removed Dashboard and Quest Operator
 Panels are not alternate production paths.
 

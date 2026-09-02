@@ -76,21 +76,12 @@
       },
       "foxglovePanelTitle": "EEF / desired EEF"
     },
-    "DiagnosticSummary!quest-diagnostics": {
-      "minLevel": 0,
-      "pinnedIds": [],
-      "hardwareIdFilter": "",
-      "topicToRender": "/teleop/diagnostics",
-      "sortByLevel": true,
-      "secondsUntilStale": 3,
-      "foxglovePanelTitle": "System status"
-    },
-    "DiagnosticStatusPanel!quest-workflow": {
+    "DiagnosticStatusPanel!quest-controller": {
       "topicToRender": "/teleop/diagnostics",
       "selectedHardwareId": "quest-teleop",
-      "selectedName": "Teleop/Workflow",
+      "selectedName": "Teleop/Controller",
       "splitFraction": 0.32,
-      "foxglovePanelTitle": "Current status and next action"
+      "foxglovePanelTitle": "Quest controller"
     },
     "CallService!quest-hold": {
       "serviceName": "/teleop/hold",
@@ -190,12 +181,7 @@
       "first": {
         "direction": "row",
         "first": "3D!quest-eef",
-        "second": {
-          "direction": "column",
-          "first": "DiagnosticSummary!quest-diagnostics",
-          "second": "DiagnosticStatusPanel!quest-workflow",
-          "splitPercentage": 48
-        },
+        "second": "DiagnosticStatusPanel!quest-controller",
         "splitPercentage": 55
       },
       "second": {

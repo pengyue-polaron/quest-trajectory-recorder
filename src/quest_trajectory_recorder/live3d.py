@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Live 3D browser view for Quest controller trajectory frames."""
 
 from __future__ import annotations
@@ -14,21 +13,22 @@ from pathlib import Path
 
 import zmq
 
-# Re-export moved helpers so older scripts importing from live3d keep working.
-from .calibration_profiles import (
-    DEFAULT_CALIBRATION_PATH,
-    PROFILE_RE,
-    calibration_complete,
-    calibration_file,
-    sanitize_profile,
-)
-from .live3d_web import HTML, ReusableThreadingHTTPServer, make_handler
+from .calibration_profiles import DEFAULT_CALIBRATION_PATH
+from .live3d_web import ReusableThreadingHTTPServer, make_handler
 from .live_state import EVENT_FIELDS, REMOTE_FIELDS, LiveState, is_origin
 from .quest_ports import DEFAULT_GRIPPER_PORT, setup_adb_reverse
-from .receiver import DEFAULT_PORTS, iso_now, make_socket, parse_remote_text, write_remote_row
+from .receiver import (
+    DEFAULT_PORTS,
+    iso_now,
+    make_socket,
+    parse_remote_text,
+    write_remote_row,
+)
+
+DEFAULT_CALIBRATION_WEB_PORT = 8766
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Live 3D browser visualizer for Quest controller trajectories.")
     parser.add_argument("--host", default="0.0.0.0", help="ZMQ bind host for Quest/APK frames.")
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pause-port", type=int, default=DEFAULT_PORTS["pause"])
     parser.add_argument("--gripper-port", type=int, default=DEFAULT_GRIPPER_PORT)
     parser.add_argument("--web-host", default="127.0.0.1")
-    parser.add_argument("--web-port", type=int, default=8765)
+    parser.add_argument("--web-port", type=int, default=DEFAULT_CALIBRATION_WEB_PORT)
     parser.add_argument("--out-dir", type=Path, default=Path("captures"))
     parser.add_argument(
         "--calibration-out",
@@ -44,7 +44,10 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CALIBRATION_PATH,
         help="Path where browser teleop-frame calibration is saved for downstream teleop scripts.",
     )
-    parser.add_argument("--session", default=dt.datetime.now().strftime("live_%Y%m%d_%H%M%S"))
+    parser.add_argument(
+        "--session",
+        default=dt.datetime.now().astimezone().strftime("live_%Y%m%d_%H%M%S"),
+    )
     parser.add_argument("--max-points", type=int, default=5000, help="Max points kept in browser memory.")
     parser.add_argument("--print-every", type=int, default=60, help="Print every N accepted poses; 0 disables.")
     parser.add_argument("--trajectory-gate-pause", choices=("High", "Low"), default="High")
@@ -65,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-record", action="store_true", help="Do not write captures/*.csv files.")
     parser.add_argument("--adb-reverse", action="store_true", help="Run adb reverse for the Quest ports before listening.")
     parser.add_argument("--open-browser", action="store_true", help="Open the live viewer in the default browser.")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:

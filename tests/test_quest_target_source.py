@@ -1,0 +1,95 @@
+import socket
+
+import zmq
+
+from quest_trajectory_recorder.quest_target_source import DirectQuestTargetSource
+
+VALID = b"absolute|0.1,1.2,0.3|0,0,0,1|False"
+ZERO_PLACEHOLDER = b"absolute|0,0,0|0,0,0,1|False"
+
+
+def unused_tcp_port():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+
+def make_source():
+    context = zmq.Context()
+    remote_port = unused_tcp_port()
+    pause_port = unused_tcp_port()
+    while pause_port == remote_port:
+        pause_port = unused_tcp_port()
+    source = DirectQuestTargetSource(
+        context=context,
+        host="127.0.0.1",
+        remote_port=remote_port,
+        pause_port=pause_port,
+        calibration=None,
+        no_gate=True,
+        trajectory_gate_pause="High",
+        allow_initial_high=True,
+        gripper_mode="toggle",
+        tracking_loss_grace_ms=120.0,
+    )
+    return context, source
+
+
+def test_isolated_origin_placeholder_does_not_break_tracking():
+    context, source = make_source()
+    try:
+        first = source._update_remote(VALID, received_monotonic_ns=1_000_000_000)
+        dropped = source._update_remote(
+            ZERO_PLACEHOLDER,
+            received_monotonic_ns=1_020_000_000,
+        )
+        resumed = source._update_remote(
+            VALID,
+            received_monotonic_ns=1_040_000_000,
+        )
+
+        assert first is not None and first.tracking_valid
+        assert dropped is None
+        assert resumed is not None and resumed.tracking_valid
+        assert source.tracking_loss_count == 0
+        assert source.consecutive_invalid_count == 0
+        assert source.take_events() == []
+    finally:
+        source.close()
+        context.term()
+
+
+def test_sustained_origin_placeholders_still_publish_safety_hold():
+    context, source = make_source()
+    try:
+        source._update_remote(VALID, received_monotonic_ns=1_000_000_000)
+        assert (
+            source._update_remote(
+                ZERO_PLACEHOLDER,
+                received_monotonic_ns=1_010_000_000,
+            )
+            is None
+        )
+        invalid = source._update_remote(
+            ZERO_PLACEHOLDER,
+            received_monotonic_ns=1_140_000_000,
+        )
+
+        assert invalid is not None and not invalid.tracking_valid
+        assert source.tracking_loss_count == 1
+        assert invalid.source_metadata["tracking_invalid_duration_ms"] == 130.0
+        assert source.take_events() == [
+            "Controller tracking lost; publishing an immediate safety hold."
+        ]
+
+        recovered = source._update_remote(
+            VALID,
+            received_monotonic_ns=1_150_000_000,
+        )
+        assert recovered is not None and recovered.tracking_valid
+        assert source.take_events() == [
+            "Controller pose returned; downstream guard is stabilizing and re-anchoring."
+        ]
+    finally:
+        source.close()
+        context.term()

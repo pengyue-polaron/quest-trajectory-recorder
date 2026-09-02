@@ -14,7 +14,7 @@ license = "MIT"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "websockets>=15,<18"]
-foxglove = ["foxglove-sdk>=0.27,<0.28"]
+foxglove = ["foxglove-sdk>=0.27,<0.28", "websockets>=15,<18"]
 
 [project.scripts]
 quest-receive = "quest_trajectory_recorder.receiver:main"

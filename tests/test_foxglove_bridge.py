@@ -1,6 +1,6 @@
 import json
 
-from embodied_ops.teleop import TeleopCommandResult, TeleopFeedback
+from embodied_ops.teleop import TeleopCommandResult, TeleopFeedback, TeleopTarget
 from foxglove.messages import PoseInFrame
 from websockets.sync.client import connect
 
@@ -113,18 +113,153 @@ def test_diagnostics_explain_tracking_loss_and_safe_hold() -> None:
             "last_invalid_reason": "zero_position",
         },
         source_age_sec=0.1,
+        target=TeleopTarget(
+            seq=8,
+            timestamp=1.0,
+            position=[0.4, 0.5, 0.6],
+            rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            gripper=-1.0,
+            gate_open=True,
+            source="quest",
+            session_id="test",
+            frame_id=8,
+            tracking_valid=False,
+        ),
+        target_age_sec=0.01,
         feedback=feedback,
         feedback_age_sec=0.02,
     )
-    statuses = {status["name"]: status for status in message["status"]}
-    assert statuses["Teleop/Workflow"]["level"] == 1
-    assert "tracking invalid" in statuses["Teleop/Workflow"]["message"]
-    assert set(statuses) == {"Teleop/Workflow", "Teleop/Safety"}
-    assert statuses["Teleop/Safety"]["hardware_id"] == "quest-teleop"
-    assert {item["key"] for item in statuses["Teleop/Safety"]["values"]} >= {
-        "Guard",
-        "Rejected jumps",
+    status = message["status"][0]
+    assert status["name"] == "Teleop/Controller"
+    assert status["level"] == 1
+    assert status["message"] == "Controller tracking unavailable"
+    assert status["hardware_id"] == "quest-teleop"
+    assert status["values"] == [
+        {"key": "Streaming", "value": "ON · B pressed"},
+        {"key": "Controller pose (m)", "value": "Unavailable"},
+        {"key": "Quest online", "value": "ONLINE"},
+    ]
+
+
+def test_diagnostics_show_live_stream_and_controller_position() -> None:
+    target = TeleopTarget(
+        seq=9,
+        timestamp=1.0,
+        position=[0.1234, -0.2, 0.03],
+        rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        gripper=-1.0,
+        gate_open=True,
+        source="quest",
+        session_id="test",
+        frame_id=9,
+        tracking_valid=True,
+    )
+    feedback = TeleopFeedback(
+        backend="unit",
+        episode_id="episode",
+        frame_index=1,
+        status="running",
+        target_seq=9,
+        target_age_ms=4.0,
+        gate_open=True,
+        recording=False,
+        eef_position=[0.0, 0.0, 0.0],
+        gripper=-1.0,
+        action=[0.0] * 7,
+        diagnostics={"mapping_reason": "active"},
+    )
+    message = diagnostic_array(
+        timestamp_ns=123,
+        source_status={
+            "adb_connected": True,
+            "app_resumed": True,
+            "controller_stream_online": True,
+            "tracking_valid": True,
+            "gate_open": True,
+        },
+        source_age_sec=0.1,
+        target=target,
+        target_age_sec=0.01,
+        feedback=feedback,
+        feedback_age_sec=0.01,
+    )
+    status = message["status"][0]
+    assert status["level"] == 0
+    assert status["message"] == "Streaming"
+    assert status["values"][1]["value"] == "x +0.123  y -0.200  z +0.030"
+
+
+def test_fresh_target_proves_quest_online_when_status_heartbeat_is_dropped() -> None:
+    target = TeleopTarget(
+        seq=9,
+        timestamp=1.0,
+        position=[0.1, 0.2, 0.3],
+        rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        gripper=-1.0,
+        gate_open=True,
+        source="quest",
+        session_id="test",
+        frame_id=9,
+        tracking_valid=True,
+    )
+    feedback = TeleopFeedback(
+        backend="unit",
+        episode_id="episode",
+        frame_index=1,
+        status="running",
+        target_seq=9,
+        target_age_ms=4.0,
+        gate_open=True,
+        recording=False,
+        eef_position=[0.0, 0.0, 0.0],
+        gripper=-1.0,
+        action=[0.0] * 7,
+        diagnostics={"mapping_reason": "active"},
+    )
+    status = diagnostic_array(
+        timestamp_ns=123,
+        source_status=None,
+        source_age_sec=None,
+        target=target,
+        target_age_sec=0.01,
+        feedback=feedback,
+        feedback_age_sec=0.01,
+    )["status"][0]
+    assert status["message"] == "Streaming"
+    assert status["values"][2]["value"] == "ONLINE"
+
+
+def test_diagnostics_distinguish_paused_from_a_stale_controller_pose() -> None:
+    source_status = {
+        "adb_connected": True,
+        "app_resumed": True,
+        "controller_stream_online": True,
+        "tracking_valid": True,
+        "gate_open": False,
     }
+    paused = diagnostic_array(
+        timestamp_ns=123,
+        source_status=source_status,
+        source_age_sec=0.1,
+        target=None,
+        target_age_sec=None,
+        feedback=None,
+        feedback_age_sec=None,
+    )["status"][0]
+    assert paused["message"] == "Paused — press B to stream"
+    assert paused["values"][0]["value"] == "PAUSED · B released"
+
+    stale_source = diagnostic_array(
+        timestamp_ns=123,
+        source_status=source_status,
+        source_age_sec=3.0,
+        target=None,
+        target_age_sec=None,
+        feedback=None,
+        feedback_age_sec=None,
+    )["status"][0]
+    assert stale_source["message"] == "Quest offline"
+    assert stale_source["values"][0]["value"] == "UNKNOWN"
 
 
 def test_diagnostics_mark_missing_source_as_stale() -> None:
@@ -132,12 +267,14 @@ def test_diagnostics_mark_missing_source_as_stale() -> None:
         timestamp_ns=123,
         source_status=None,
         source_age_sec=None,
+        target=None,
+        target_age_sec=None,
         feedback=None,
         feedback_age_sec=None,
     )
-    workflow = message["status"][0]
-    assert workflow["level"] == 3
-    assert "Robot motion frozen" in workflow["message"]
+    status = message["status"][0]
+    assert status["level"] == 3
+    assert status["message"] == "Quest offline"
 
 
 def test_deep_link_selects_organization_layout_and_local_bridge() -> None:

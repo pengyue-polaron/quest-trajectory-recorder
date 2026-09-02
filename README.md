@@ -54,6 +54,7 @@ The recorder uses the host receive time (`recv_unix`, `recv_iso`). The Quest app
 | `8131` | backend -> observers | Action-aligned feedback plus Agent/wrist JPEG frames |
 | `8132` | UI <-> backend | Acknowledged Hold/reset/recording operator commands |
 | `8765` | Foxglove -> host | Official Foxglove SDK WebSocket gateway |
+| `8766` | browser -> host | Quest calibration web page (pre-collection only) |
 
 ## Decoupled ManiSkill / MuJoCo workflow
 
@@ -86,8 +87,9 @@ old controller pose.
 
 Meta may put a controller into `CONNECTED_INACTIVE` when the headset is not
 worn. ADB can still look healthy in that state, but 6DoF input is unavailable.
-Foxglove's native Diagnostics panels distinguish ADB, app focus, controller
-stream, 6DoF tracking, backend feedback, safety recovery, and recording state.
+Foxglove's native Diagnostics panel shows only the B-button streaming state,
+the live controller pose, and whether Quest is online. Its headline also makes
+tracking loss or a stalled backend immediately visible.
 
 ## Installation
 
@@ -201,7 +203,7 @@ scripts/run_live3d.sh --open-browser
 If the browser is not opened automatically, visit:
 
 ```text
-http://127.0.0.1:8765/
+http://127.0.0.1:8766/
 ```
 
 The browser tool shows:

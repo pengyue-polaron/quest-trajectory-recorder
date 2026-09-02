@@ -5,8 +5,8 @@
 - `run_quest_session.sh`: the only maintained ManiSkill/MuJoCo collection
   launcher. It waits for Quest ADB, owns source/backend/Foxglove, restores the
   Quest stream after reconnects, and cleans up the whole process group.
-- `run_calibration.sh`: open the Quest-only calibration page and save a named
-  profile before physical collection.
+- `run_calibration.sh`: open the Quest-only calibration page on HTTP 8766 and
+  save a named profile before physical collection.
 
 ## Device and environment
 
@@ -19,8 +19,9 @@
 ## Low-level components
 
 - `run_quest_tracker_hub.sh`: raw Quest ports to canonical ZMQ target stream.
-- `run_foxglove_bridge.sh`: canonical ZMQ streams to Foxglove WebSocket.
-- `run_live3d.sh`: calibration server used by `run_calibration.sh`.
+- `run_foxglove_bridge.sh`: canonical ZMQ streams to Foxglove WebSocket 8765.
+- `run_live3d.sh`: calibration server used by `run_calibration.sh` (HTTP 8766
+  by default).
 - `run_libero_teleop.sh`: optional LIBERO backend; it consumes only the
   canonical target stream and never binds Quest ports.
 
