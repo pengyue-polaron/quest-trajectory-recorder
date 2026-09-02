@@ -212,7 +212,12 @@ def diagnostic_array(
     app_resumed = synthetic_source or target_fresh or bool(
         status_fresh and source.get("app_resumed")
     )
-    gate_known = target_fresh or status_fresh
+    pause_state = source.get("pause_state")
+    gate_known = bool(
+        target_fresh
+        or synthetic_source
+        or (status_fresh and pause_state in {"High", "Low"})
+    )
     gate_open = bool(
         target.gate_open if target_fresh and target is not None else source.get("gate_open")
     )
@@ -260,6 +265,10 @@ def diagnostic_array(
 
     if not gate_known:
         streaming_label = "UNKNOWN"
+    elif not stream_online:
+        streaming_label = (
+            "OFFLINE · B pressed" if gate_open else "OFFLINE · B released"
+        )
     elif gate_open:
         streaming_label = "ON · B pressed"
     else:

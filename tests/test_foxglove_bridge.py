@@ -238,6 +238,7 @@ def test_diagnostics_distinguish_paused_from_a_stale_controller_pose() -> None:
         "controller_stream_online": True,
         "tracking_valid": True,
         "gate_open": False,
+        "pause_state": "Low",
     }
     paused = diagnostic_array(
         timestamp_ns=123,
@@ -262,6 +263,46 @@ def test_diagnostics_distinguish_paused_from_a_stale_controller_pose() -> None:
     )["status"][0]
     assert stale_source["message"] == "Quest offline"
     assert stale_source["values"][0]["value"] == "UNKNOWN"
+
+
+def test_diagnostics_do_not_invent_a_b_state_before_controller_input() -> None:
+    unknown = diagnostic_array(
+        timestamp_ns=123,
+        source_status={
+            "adb_connected": True,
+            "app_resumed": True,
+            "controller_stream_online": False,
+            "tracking_valid": False,
+            "gate_open": False,
+            "pause_state": None,
+        },
+        source_age_sec=0.1,
+        target=None,
+        target_age_sec=None,
+        feedback=None,
+        feedback_age_sec=None,
+    )["status"][0]
+    assert unknown["message"] == "Controller offline"
+    assert unknown["values"][0]["value"] == "UNKNOWN"
+
+    last_pressed = diagnostic_array(
+        timestamp_ns=123,
+        source_status={
+            "adb_connected": True,
+            "app_resumed": True,
+            "controller_stream_online": False,
+            "tracking_valid": False,
+            "gate_open": True,
+            "pause_state": "High",
+        },
+        source_age_sec=0.1,
+        target=None,
+        target_age_sec=None,
+        feedback=None,
+        feedback_age_sec=None,
+    )["status"][0]
+    assert last_pressed["message"] == "Controller offline"
+    assert last_pressed["values"][0]["value"] == "OFFLINE · B pressed"
 
 
 def test_diagnostics_mark_missing_source_as_stale() -> None:
