@@ -86,7 +86,7 @@ const CONTROL_GROUPS: ControlGroup[] = [
         id: "discard",
         label: "Discard",
         service: "/teleop/recording/discard",
-        title: "Mark the current partial recording as incomplete",
+        title: "Permanently delete the current recording",
         tone: "danger",
       },
     ],
@@ -98,7 +98,7 @@ function responseMessage(response: unknown, fallback: string): string {
     return fallback;
   }
   const result = response as CommandResponse;
-  if (result.accepted === false || result.applied === false) {
+  if (result.accepted !== true || result.applied !== true) {
     throw new Error(result.message ?? "Command rejected by backend");
   }
   return result.message ?? fallback;
@@ -112,6 +112,7 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
   const [pending, setPending] = useState<string>();
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string }>();
   const noticeTimer = useRef<number>();
+  const requestInFlight = useRef(false);
 
   const showNotice = useCallback((tone: "ok" | "error", text: string) => {
     window.clearTimeout(noticeTimer.current);
@@ -130,7 +131,7 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
 
   const run = useCallback(
     async (control: Control) => {
-      if (pending != undefined) {
+      if (requestInFlight.current) {
         return;
       }
       if (context.callService == undefined) {
@@ -138,6 +139,14 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
         return;
       }
 
+      if (
+        control.id === "discard" &&
+        !window.confirm("Discard and permanently delete the current recording?")
+      ) {
+        return;
+      }
+
+      requestInFlight.current = true;
       setPending(control.id);
       setNotice(undefined);
       try {
@@ -146,10 +155,11 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
       } catch (error) {
         showNotice("error", errorMessage(error));
       } finally {
+        requestInFlight.current = false;
         setPending(undefined);
       }
     },
-    [context, pending, showNotice],
+    [context, showNotice],
   );
 
   return (

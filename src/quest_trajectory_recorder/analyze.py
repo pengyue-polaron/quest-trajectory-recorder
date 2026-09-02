@@ -9,7 +9,6 @@ import math
 import statistics
 from pathlib import Path
 
-
 AXES = ("x", "y", "z")
 POS_KEYS = ("pos_x", "pos_y", "pos_z")
 QUAT_KEYS = ("quat_x", "quat_y", "quat_z", "quat_w")
@@ -54,7 +53,9 @@ def norm3(v: tuple[float, float, float]) -> float:
     return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
 
 
-def sub3(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+def sub3(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
@@ -78,7 +79,9 @@ def quat_norm(q: tuple[float, float, float, float]) -> float:
     return math.sqrt(sum(x * x for x in q))
 
 
-def quat_angle_deg(q0: tuple[float, float, float, float], q1: tuple[float, float, float, float]) -> float:
+def quat_angle_deg(
+    q0: tuple[float, float, float, float], q1: tuple[float, float, float, float]
+) -> float:
     n0 = quat_norm(q0)
     n1 = quat_norm(q1)
     if n0 == 0 or n1 == 0:
@@ -116,12 +119,23 @@ def quat_axes_xyzw(q: tuple[float, float, float, float]) -> tuple[tuple[float, f
 
 
 def print_auxiliary_axis_report(rows: list[dict[str, object]]) -> None:
-    samples: list[tuple[tuple[float, float, float], list[tuple[float, float, float]], tuple[float, float, float, float]]] = []
+    samples: list[
+        tuple[
+            tuple[float, float, float],
+            list[tuple[float, float, float]],
+            tuple[float, float, float, float],
+        ]
+    ] = []
     for row in rows:
         pos = row["pos"]
         quat = row["quat"]
         points = row.get("points", [])
-        if isinstance(pos, tuple) and isinstance(quat, tuple) and isinstance(points, list) and len(points) >= 3:
+        if (
+            isinstance(pos, tuple)
+            and isinstance(quat, tuple)
+            and isinstance(points, list)
+            and len(points) >= 3
+        ):
             samples.append((pos, points, quat))  # type: ignore[arg-type]
 
     if not samples:
@@ -141,7 +155,9 @@ def print_auxiliary_axis_report(rows: list[dict[str, object]]) -> None:
             best = max(range(3), key=lambda index: abs(dots[index]))
             signed_matches.append((best, dots[best]))
 
-        counts = {index: sum(1 for best, _ in signed_matches if best == index) for index in range(3)}
+        counts = {
+            index: sum(1 for best, _ in signed_matches if best == index) for index in range(3)
+        }
         best_index = max(counts, key=counts.get)
         best_dots = [dot for best, dot in signed_matches if best == best_index]
         sign = "+" if mean(best_dots) >= 0 else "-"
@@ -166,7 +182,9 @@ def print_static_segment(name: str, rows: list[dict[str, object]]) -> None:
     print(f"{name} static-window sanity ({len(rows)} samples; only valid if you held still):")
     print(f"  centroid: x={center[0]:.6f}, y={center[1]:.6f}, z={center[2]:.6f}")
     print(f"  std:      x={pstdev(xs):.6f}, y={pstdev(ys):.6f}, z={pstdev(zs):.6f}")
-    print(f"  jitter:   rms={math.sqrt(mean([r * r for r in radii])):.6f} m, max={max(radii):.6f} m")
+    print(
+        f"  jitter:   rms={math.sqrt(mean([r * r for r in radii])):.6f} m, max={max(radii):.6f} m"
+    )
 
 
 def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
@@ -198,7 +216,9 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
     ranges = [max(vals) - min(vals) for vals in (xs, ys, zs)]
 
     path_len = 0.0
-    steps: list[tuple[float, float, int, int, tuple[float, float, float], tuple[float, float, float]]] = []
+    steps: list[
+        tuple[float, float, int, int, tuple[float, float, float], tuple[float, float, float]]
+    ] = []
     for row_a, row_b, pos_a, pos_b in zip(work_rows, work_rows[1:], positions, positions[1:]):
         step = norm3(sub3(pos_b, pos_a))  # type: ignore[arg-type]
         path_len += step
@@ -229,23 +249,31 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
     print(f"  receive span: {fmt_s(duration)}")
     print(f"  receive rate estimate: {fps:.1f} Hz")
     if fps > 240:
-        print("  warning: receive timestamps look buffered/bursty; use them for ordering, not timing accuracy.")
+        print(
+            "  warning: receive timestamps look buffered/bursty; use them for ordering, not timing accuracy."
+        )
     print()
 
     print("Position ranges:")
     for axis, vals, rng in zip(AXES, (xs, ys, zs), ranges):
-        print(f"  {axis}: min={fmt_m(min(vals))}, max={fmt_m(max(vals))}, range={fmt_m(rng)}, std={fmt_m(pstdev(vals))}")
+        print(
+            f"  {axis}: min={fmt_m(min(vals))}, max={fmt_m(max(vals))}, range={fmt_m(rng)}, std={fmt_m(pstdev(vals))}"
+        )
 
     dominant = max(range(3), key=lambda i: ranges[i])
     second = sorted(ranges, reverse=True)[1] if len(ranges) > 1 else 0.0
     ratio = ranges[dominant] / second if second > 0 else float("inf")
-    print(f"  dominant varying stream axis: +-{AXES[dominant].upper()} (range {fmt_m(ranges[dominant])}, ratio vs next {ratio:.2f}x)")
+    print(
+        f"  dominant varying stream axis: +-{AXES[dominant].upper()} (range {fmt_m(ranges[dominant])}, ratio vs next {ratio:.2f}x)"
+    )
     print()
 
     print("Path:")
     print(f"  start: x={positions[0][0]:.6f}, y={positions[0][1]:.6f}, z={positions[0][2]:.6f}")  # type: ignore[index]
     print(f"  end:   x={positions[-1][0]:.6f}, y={positions[-1][1]:.6f}, z={positions[-1][2]:.6f}")  # type: ignore[index]
-    print(f"  displacement: dx={displacement[0]:.6f}, dy={displacement[1]:.6f}, dz={displacement[2]:.6f}, norm={fmt_m(straight)}")
+    print(
+        f"  displacement: dx={displacement[0]:.6f}, dy={displacement[1]:.6f}, dz={displacement[2]:.6f}, norm={fmt_m(straight)}"
+    )
     print(f"  integrated path length: {fmt_m(path_len)}")
     jump_candidates = [step for step in steps if step[0] > 0.10]
     if jump_candidates:
@@ -261,7 +289,9 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
     quat_norms = [quat_norm(q) for q in quats]  # type: ignore[arg-type]
     rotation_from_start = [quat_angle_deg(quats[0], q) for q in quats]  # type: ignore[arg-type]
     print("Orientation:")
-    print(f"  quaternion norm: min={min(quat_norms):.6f}, max={max(quat_norms):.6f}, mean={mean(quat_norms):.6f}")
+    print(
+        f"  quaternion norm: min={min(quat_norms):.6f}, max={max(quat_norms):.6f}, mean={mean(quat_norms):.6f}"
+    )
     print(f"  max rotation from first sample: {max(rotation_from_start):.2f} deg")
     print()
 
@@ -276,7 +306,9 @@ def analyze(path: Path, drop_leading_origin: bool, static_samples: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("csv", type=Path, help="A *_remote.csv capture from quest_trajectory_recorder.receiver")
+    parser.add_argument(
+        "csv", type=Path, help="A *_remote.csv capture from quest_trajectory_recorder.receiver"
+    )
     parser.add_argument(
         "--drop-leading-origin",
         action="store_true",

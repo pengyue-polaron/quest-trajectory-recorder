@@ -78,9 +78,7 @@ def test_publishes_extension_before_layout_and_verifies_both(tmp_path: Path) -> 
     layout.write_text('{"layout":{"direction":"row"}}', encoding="utf-8")
     api = FakeApi()
 
-    result = publish_assets(
-        api, extension=extension, layout=layout, layout_id="lay_test"
-    )
+    result = publish_assets(api, extension=extension, layout=layout, layout_id="lay_test")
 
     assert result.extension_id == "ext_123"
     assert result.layout_id == "lay_test"

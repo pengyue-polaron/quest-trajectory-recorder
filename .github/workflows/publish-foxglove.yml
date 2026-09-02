@@ -32,6 +32,16 @@ jobs:
           cache: npm
           cache-dependency-path: foxglove/quest-teleop-controls/package-lock.json
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify publisher
+        working-directory: .
+        run: |
+          python -m pip install pytest
+          PYTHONPATH=src python -m pytest -q tests/test_foxglove_publish.py
+
       - name: Install dependencies
         run: npm ci
 

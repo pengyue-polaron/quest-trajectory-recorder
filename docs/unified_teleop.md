@@ -188,10 +188,11 @@ The same layout is shared by both maintained simulator backends:
 
 - Quest repository: APK parsing, ADB, calibration, target publication, session
   composition, and the Foxglove gateway/layout.
-- `embodied-ops`: canonical schemas, ZMQ transport, and the source-neutral
-  Cartesian dropout/reacquisition guard.
-- Backend repository: clutch configuration, workspace/action limits, native action,
-  task reset/navigation, cameras, recording, and command acknowledgement.
+- `embodied-ops`: canonical schemas, ZMQ transport, relative-clutch Cartesian
+  mapping, dropout/reacquisition guard, and episode-manifest mechanics.
+- Backend repository: thresholds, workspace/action limits, native action,
+  task reset/navigation, cameras, task-specific record fields, and command
+  acknowledgement.
 - Foxglove: visualization and semantic service requests; never raw actuator
   authority.
 
@@ -201,9 +202,18 @@ accepted. Older Quest-prefixed schemas are rejected instead of upgraded.
 
 ## Synchronized records
 
-Both backends write pre-action `agent_view.mp4` and `wrist.mp4` plus one JSONL
-row per native action. Each row contains the canonical target, timing, action,
-EEF/proprioception, camera indexes, watchdog/hold reason, and saturation
-diagnostics. Clean completion atomically renames partial files and writes a
-complete manifest. MuJoCo additionally preserves every 500 Hz physics substep
-in HDF5.
+Both backends write pre-action `agent_view.mp4` and `wrist_camera.mp4` plus one
+`embodied.teleop_step/v1` row in `steps.jsonl` per native action. Each row
+contains the canonical target, timing, action, EEF/proprioception, exact camera
+indexes, watchdog/hold reason, task diagnostics, and saturation evidence.
+`manifest.json` is written last as the completion marker and records the
+operator disposition, training eligibility, termination reason, aligned sample
+counts, byte sizes, and SHA-256 hashes. MuJoCo additionally preserves every
+500 Hz physics substep in `force_telemetry.h5`. Discard removes the take instead
+of leaving ambiguous partial data; interruption is retained but explicitly
+marked in the manifest. Source/session/controller/calibration provenance is
+summarized per take; a mixed session, sequence regression, or missing/mixed
+Quest calibration digest automatically makes the take ineligible for training.
+The same fail-closed rule applies when a recorded camera source frame does not
+match its action frame; the exact mismatch count and maximum camera age remain
+in the manifest for diagnosis.

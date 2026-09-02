@@ -15,9 +15,9 @@ def test_calibration_web_port_is_separate_from_foxglove() -> None:
 
 
 def test_session_launcher_uses_protocol_probe_and_child_liveness() -> None:
-    launcher = (
-        Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh"
-    ).read_text(encoding="utf-8")
+    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert "quest_trajectory_recorder.foxglove_probe" in launcher
     assert 'kill -0 "$FOXGLOVE_PID"' in launcher

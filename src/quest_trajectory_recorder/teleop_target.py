@@ -63,9 +63,7 @@ def target_from_remote(
         session_id=session_id,
         frame_id=remote_count,
         host_received_monotonic_ns=(
-            time.monotonic_ns()
-            if received_monotonic_ns is None
-            else received_monotonic_ns
+            time.monotonic_ns() if received_monotonic_ns is None else received_monotonic_ns
         ),
         host_published_unix_ns=now_ns,
         tracking_valid=True,

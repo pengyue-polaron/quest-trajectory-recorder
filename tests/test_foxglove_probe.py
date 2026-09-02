@@ -25,9 +25,7 @@ def test_probe_accepts_foxglove_server_info() -> None:
         port=0,
     )
     try:
-        assert is_foxglove_server_ready(
-            f"ws://127.0.0.1:{bridge.port}", timeout_sec=2.0
-        )
+        assert is_foxglove_server_ready(f"ws://127.0.0.1:{bridge.port}", timeout_sec=2.0)
     finally:
         bridge.close()
 
@@ -37,9 +35,7 @@ def test_probe_rejects_plain_http_listener() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        assert not is_foxglove_server_ready(
-            f"ws://127.0.0.1:{server.server_port}", timeout_sec=0.5
-        )
+        assert not is_foxglove_server_ready(f"ws://127.0.0.1:{server.server_port}", timeout_sec=0.5)
     finally:
         server.shutdown()
         server.server_close()

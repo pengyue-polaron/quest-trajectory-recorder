@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import signal
 import time
 import uuid
 
 import zmq
+from embodied_ops.teleop import TeleopSourceStatus
 from embodied_ops.teleop.zmq_transport import (
     DEFAULT_TARGET_ENDPOINT,
     TeleopTargetPublisher,
@@ -25,20 +25,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--duration-sec", type=float, default=0.0, help="Zero runs until interrupted."
     )
-    parser.add_argument(
-        "--pattern", choices=("hold", "circle", "axes"), default="circle"
-    )
+    parser.add_argument("--pattern", choices=("hold", "circle", "axes"), default="circle")
     parser.add_argument("--amplitude-m", type=float, default=0.04)
     parser.add_argument("--period-sec", type=float, default=8.0)
-    parser.add_argument(
-        "--gate-open", action=argparse.BooleanOptionalAction, default=True
-    )
+    parser.add_argument("--gate-open", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args(argv)
 
 
-def _position(
-    pattern: str, elapsed: float, amplitude: float, period: float
-) -> list[float]:
+def _position(pattern: str, elapsed: float, amplitude: float, period: float) -> list[float]:
     if pattern == "hold":
         return [0.0, 0.0, 0.0]
     phase = (elapsed % period) / period
@@ -61,7 +55,9 @@ def _position(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.rate_hz <= 0 or args.period_sec <= 0 or args.amplitude_m < 0:
-        raise ValueError("rate, period, and amplitude must be positive")
+        raise ValueError("rate and period must be positive; amplitude must be non-negative")
+    if args.duration_sec < 0:
+        raise ValueError("--duration-sec must be non-negative")
     context = zmq.Context()
     publisher = TeleopTargetPublisher(context, args.bind)
     stop = False
@@ -88,9 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.duration_sec > 0 and elapsed >= args.duration_sec:
                 break
             seq += 1
-            position = _position(
-                args.pattern, elapsed, args.amplitude_m, args.period_sec
-            )
+            position = _position(args.pattern, elapsed, args.amplitude_m, args.period_sec)
             now_ns = time.time_ns()
             target = TeleopTarget(
                 seq=seq,
@@ -121,16 +115,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             publisher.publish(target)
             if seq == 1 or seq % max(1, round(args.rate_hz)) == 0:
-                status = {
-                    "schema_version": "embodied.teleop_source_status/v1",
-                    "session_id": session_id,
-                    "state": "streaming",
-                    "target_seq": seq,
-                    "gate_open": args.gate_open,
-                    "source": "synthetic",
-                    "timestamp_unix_ns": now_ns,
-                }
-                publisher.publish_status(json.dumps(status).encode("utf-8"))
+                publisher.publish_status(
+                    TeleopSourceStatus(
+                        source="synthetic",
+                        session_id=session_id,
+                        state="streaming" if args.gate_open else "ready",
+                        target_seq=seq,
+                        target_age_ms=0.0,
+                        gate_open=args.gate_open,
+                        control_ready=args.gate_open,
+                        stream_online=True,
+                        tracking_valid=True,
+                        pause_state="High" if args.gate_open else "Low",
+                        timestamp_unix_ns=now_ns,
+                    )
+                )
             deadline += 1.0 / args.rate_hz
             delay = deadline - time.monotonic()
             if delay > 0:

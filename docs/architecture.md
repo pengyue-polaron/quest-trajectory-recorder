@@ -10,7 +10,7 @@ raw Quest APK ports
   -> calibration browser on HTTP 8766 (pre-collection only)
   -> Quest parser + named calibration
   -> embodied.teleop_target/v1 on ZMQ 8130
-  -> backend-owned mapper/safety/recorder
+  -> shared clutch/guard + backend-owned native action/camera/task record fields
   -> embodied.teleop_feedback/v1 on ZMQ 8131
   -> Foxglove gateway on WebSocket 8765
 
@@ -42,10 +42,10 @@ Panels are not alternate production paths.
 | `foxglove/quest-teleop-controls` | Compact React panel that calls the acknowledged Foxglove services. |
 | `foxglove_publish.py` | CI publisher for the versioned `.foxe` and organization layout. |
 | `live3d.py`, `live3d_web.py` | Quest-only calibration UI and profile writer. |
-| `libero_teleop.py` | Optional LIBERO backend consuming canonical ZMQ only. |
 
-Shared schemas, geometry, transport, and the source-neutral Cartesian tracking
-guard are imported directly from `embodied_ops.teleop`. This repository
+Shared schemas, geometry, transport, source status, commands, recording
+primitives, and Cartesian clutch mapping are imported directly from
+`embodied_ops.teleop`. This repository
 contains no compatibility re-export and does not accept Quest-prefixed target
 schemas.
 
@@ -59,8 +59,10 @@ embodied-ops canonical contracts + ZMQ
 ```
 
 Neither backend imports this repository. The source owns APK parsing and
-calibration. Each backend owns clutching, freshness watchdog, workspace/action
-limits, task resets, native actions, cameras, recording, and command ACKs.
+calibration. The shared package owns clutch/freshness/workspace mechanisms,
+recording schemas, and command vocabulary; each backend chooses the safety
+thresholds and workspace policy and owns task resets, native actions, cameras,
+task diagnostics, and only acknowledges a command after its effect is complete.
 
 ## Primary commands
 

@@ -29,8 +29,14 @@ DEFAULT_CALIBRATION_WEB_PORT = 8766
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Live 3D browser visualizer for Quest controller trajectories.")
-    parser.add_argument("--host", default="0.0.0.0", help="ZMQ bind host for Quest/APK frames.")
+    parser = argparse.ArgumentParser(
+        description="Live 3D browser visualizer for Quest controller trajectories."
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Raw Quest ZMQ bind host. The safe ADB-reverse default is loopback; opt into 0.0.0.0 for LAN.",
+    )
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
     parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
     parser.add_argument("--pause-port", type=int, default=DEFAULT_PORTS["pause"])
@@ -48,11 +54,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--session",
         default=dt.datetime.now().astimezone().strftime("live_%Y%m%d_%H%M%S"),
     )
-    parser.add_argument("--max-points", type=int, default=5000, help="Max points kept in browser memory.")
-    parser.add_argument("--print-every", type=int, default=60, help="Print every N accepted poses; 0 disables.")
+    parser.add_argument(
+        "--max-points", type=int, default=5000, help="Max points kept in browser memory."
+    )
+    parser.add_argument(
+        "--print-every", type=int, default=60, help="Print every N accepted poses; 0 disables."
+    )
     parser.add_argument("--trajectory-gate-pause", choices=("High", "Low"), default="High")
     parser.add_argument("--gate-requires-prior-pause", choices=("High", "Low"), default="Low")
-    parser.add_argument("--no-gate", action="store_true", help="Accept remote frames immediately, ignoring pause state.")
+    parser.add_argument(
+        "--no-gate",
+        action="store_true",
+        help="Accept remote frames immediately, ignoring pause state.",
+    )
     parser.add_argument(
         "--keep-origin",
         "--keep-leading-origin",
@@ -65,16 +79,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0.20,
         help="Reset the visible path when a single accepted step exceeds this distance; 0 disables.",
     )
-    parser.add_argument("--no-record", action="store_true", help="Do not write captures/*.csv files.")
-    parser.add_argument("--adb-reverse", action="store_true", help="Run adb reverse for the Quest ports before listening.")
-    parser.add_argument("--open-browser", action="store_true", help="Open the live viewer in the default browser.")
+    parser.add_argument(
+        "--no-record", action="store_true", help="Do not write captures/*.csv files."
+    )
+    parser.add_argument(
+        "--adb-reverse",
+        action="store_true",
+        help="Run adb reverse for the Quest ports before listening.",
+    )
+    parser.add_argument(
+        "--open-browser", action="store_true", help="Open the live viewer in the default browser."
+    )
     return parser.parse_args(argv)
 
 
 def main() -> int:
     args = parse_args()
+    ports = [
+        args.remote_port,
+        args.resolution_port,
+        args.pause_port,
+        args.gripper_port,
+        args.web_port,
+    ]
+    if any(port < 1 or port > 65535 for port in ports):
+        raise ValueError("Quest and Web ports must be from 1 to 65535")
+    if len(set(ports)) != len(ports):
+        raise ValueError("Quest raw-data and Web ports must be distinct")
+    if args.max_points < 10 or args.print_every < 0 or args.max_step_m < 0:
+        raise ValueError("max points/step and print interval must be non-negative and valid")
     if args.adb_reverse:
-        setup_adb_reverse([args.remote_port, args.resolution_port, args.pause_port, args.gripper_port])
+        setup_adb_reverse(
+            [args.remote_port, args.resolution_port, args.pause_port, args.gripper_port]
+        )
 
     state = LiveState(max_points=max(10, args.max_points))
     state.gate_open = bool(args.no_gate)
@@ -85,7 +122,9 @@ def main() -> int:
     events_path = args.out_dir / f"{args.session}_events.csv"
 
     args.calibration_out.parent.mkdir(parents=True, exist_ok=True)
-    server = ReusableThreadingHTTPServer((args.web_host, args.web_port), make_handler(state, args.calibration_out))
+    server = ReusableThreadingHTTPServer(
+        (args.web_host, args.web_port), make_handler(state, args.calibration_out)
+    )
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     url = f"http://{args.web_host}:{args.web_port}/"
@@ -117,7 +156,10 @@ def main() -> int:
     signal.signal(signal.SIGTERM, handle_signal)
 
     print("Waiting for Quest frames. Press Ctrl+C to stop.", flush=True)
-    print("Tip: keep Quest IP at 127.0.0.1; press B red -> green to open the trajectory gate.", flush=True)
+    print(
+        "Tip: keep Quest IP at 127.0.0.1; press B red -> green to open the trajectory gate.",
+        flush=True,
+    )
 
     remote_file = None
     event_file = None
@@ -155,7 +197,9 @@ def main() -> int:
                     if args.no_gate:
                         state.gate_open = True
                     else:
-                        state.gate_open = state.gate_prereq_seen and text == args.trajectory_gate_pause
+                        state.gate_open = (
+                            state.gate_prereq_seen and text == args.trajectory_gate_pause
+                        )
                     if state.gate_open and not previous_gate:
                         state.reset_points()
                         last_position = None
@@ -183,7 +227,9 @@ def main() -> int:
                         print(f"{recv_iso} dropped exact origin placeholder frame", flush=True)
                         continue
                     if last_position is not None and args.max_step_m > 0:
-                        step = sum((a - b) * (a - b) for a, b in zip(position, last_position)) ** 0.5
+                        step = (
+                            sum((a - b) * (a - b) for a, b in zip(position, last_position)) ** 0.5
+                        )
                         if step > args.max_step_m:
                             state.reset_points()
                             accepted = 0

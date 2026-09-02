@@ -15,9 +15,12 @@ from urllib.parse import urlencode
 import zmq
 from embodied_ops.teleop import (
     TeleopCommand,
+    TeleopCommandName,
     TeleopCommandResult,
     TeleopFeedback,
+    TeleopSourceStatus,
     TeleopTarget,
+    matrix_to_quat_xyzw,
 )
 from embodied_ops.teleop.zmq_transport import (
     DEFAULT_COMMAND_ENDPOINT,
@@ -42,17 +45,21 @@ from foxglove.websocket import Capability, ServiceRequest
 import foxglove
 from foxglove import MessageSchema, Schema, Service, ServiceSchema
 
-from .teleop_frame import matrix_to_quat_xyzw
-
 SERVICE_COMMANDS = {
-    "/teleop/hold": "hold",
-    "/teleop/resume": "resume",
-    "/teleop/episode/previous": "previous_episode",
-    "/teleop/episode/reset": "reset_episode",
-    "/teleop/episode/next": "next_episode",
-    "/teleop/recording/start": "start_recording",
-    "/teleop/recording/stop": "stop_recording",
-    "/teleop/recording/discard": "discard_episode",
+    "/teleop/hold": TeleopCommandName.HOLD.value,
+    "/teleop/resume": TeleopCommandName.RESUME.value,
+    "/teleop/episode/previous": TeleopCommandName.PREVIOUS_EPISODE.value,
+    "/teleop/episode/reset": TeleopCommandName.RESET_EPISODE.value,
+    "/teleop/episode/next": TeleopCommandName.NEXT_EPISODE.value,
+    "/teleop/recording/start": TeleopCommandName.START_RECORDING.value,
+    "/teleop/recording/stop": TeleopCommandName.STOP_RECORDING.value,
+    "/teleop/recording/discard": TeleopCommandName.DISCARD_RECORDING.value,
+}
+
+COMMAND_TIMEOUT_MS = {
+    TeleopCommandName.RESET_EPISODE.value: 30_000,
+    TeleopCommandName.PREVIOUS_EPISODE.value: 30_000,
+    TeleopCommandName.NEXT_EPISODE.value: 30_000,
 }
 
 DEFAULT_FOXGLOVE_LAYOUT_ID = "lay_0eaTLQSSPmExnWfB"
@@ -138,6 +145,7 @@ DIAGNOSTIC_STALE = 3
 _SOURCE_STALE_SEC = 2.5
 _BACKEND_STALE_SEC = 1.0
 
+
 def _display(value: Any, *, none: str = "—") -> str:
     if value is None:
         return none
@@ -178,11 +186,7 @@ def diagnostic_array(
     feedback_age_sec: float | None,
 ) -> dict[str, Any]:
     """Build one compact operator status for Foxglove's Diagnostics panel."""
-    target_fresh = (
-        target is not None
-        and target_age_sec is not None
-        and target_age_sec <= 0.5
-    )
+    target_fresh = target is not None and target_age_sec is not None and target_age_sec <= 0.5
     status_fresh = bool(
         source_status is not None
         and source_age_sec is not None
@@ -190,33 +194,26 @@ def diagnostic_array(
     )
     source_stale = not target_fresh and not status_fresh
     feedback_stale = (
-        feedback is None
-        or feedback_age_sec is None
-        or feedback_age_sec > _BACKEND_STALE_SEC
+        feedback is None or feedback_age_sec is None or feedback_age_sec > _BACKEND_STALE_SEC
     )
     source = source_status or {}
+    source_metadata = source.get("source_metadata", {})
     diagnostics = {} if feedback is None else feedback.diagnostics
     reason = str(diagnostics.get("mapping_reason", diagnostics.get("guard_reason", "")))
     synthetic_source = source.get("source") == "synthetic"
-    tracking_valid = synthetic_source or bool(
-        target.tracking_valid
-        if target_fresh and target is not None
-        else status_fresh and source.get("tracking_valid")
-    )
-    stream_online = synthetic_source or target_fresh or bool(
-        status_fresh and source.get("controller_stream_online")
-    )
-    adb_online = synthetic_source or target_fresh or bool(
-        status_fresh and source.get("adb_connected")
-    )
-    app_resumed = synthetic_source or target_fresh or bool(
-        status_fresh and source.get("app_resumed")
-    )
+    if synthetic_source:
+        tracking_valid = stream_online = adb_online = app_resumed = True
+    elif status_fresh:
+        tracking_valid = bool(source.get("tracking_valid"))
+        stream_online = bool(source.get("stream_online"))
+        adb_online = bool(source_metadata.get("adb_connected"))
+        app_resumed = bool(source_metadata.get("app_resumed"))
+    else:
+        tracking_valid = bool(target_fresh and target is not None and target.tracking_valid)
+        stream_online = adb_online = app_resumed = target_fresh
     pause_state = source.get("pause_state")
     gate_known = bool(
-        target_fresh
-        or synthetic_source
-        or (status_fresh and pause_state in {"High", "Low"})
+        target_fresh or synthetic_source or (status_fresh and pause_state in {"High", "Low"})
     )
     gate_open = bool(
         target.gate_open if target_fresh and target is not None else source.get("gate_open")
@@ -266,9 +263,7 @@ def diagnostic_array(
     if not gate_known:
         streaming_label = "UNKNOWN"
     elif not stream_online:
-        streaming_label = (
-            "OFFLINE · B pressed" if gate_open else "OFFLINE · B released"
-        )
+        streaming_label = "OFFLINE · B pressed" if gate_open else "OFFLINE · B released"
     elif gate_open:
         streaming_label = "ON · B pressed"
     else:
@@ -319,7 +314,7 @@ class CommandRouter:
         request = TeleopCommand(command=command, request_id=str(uuid.uuid4()))
         try:
             return self.request(request).to_dict()
-        except (TimeoutError, RuntimeError, zmq.ZMQError) as exc:
+        except (TimeoutError, RuntimeError, ValueError, zmq.ZMQError) as exc:
             return {
                 "schema_version": "embodied.teleop_command_result/v1",
                 "request_id": request.request_id,
@@ -419,9 +414,7 @@ def pose_message(
     quaternion_xyzw: list[float],
 ) -> PoseInFrame:
     return PoseInFrame(
-        timestamp=Timestamp(
-            timestamp_ns // 1_000_000_000, timestamp_ns % 1_000_000_000
-        ),
+        timestamp=Timestamp(timestamp_ns // 1_000_000_000, timestamp_ns % 1_000_000_000),
         frame_id=frame_id,
         pose=Pose(
             position=Vector3(x=position[0], y=position[1], z=position[2]),
@@ -496,7 +489,10 @@ class FoxgloveTeleopBridge:
         self.poller.register(self.feedback.socket, zmq.POLLIN)
 
         self.router = CommandRouter(
-            lambda command: self.command.request(command, timeout_ms=1500)
+            lambda command: self.command.request(
+                command,
+                timeout_ms=COMMAND_TIMEOUT_MS.get(command.command, 5_000),
+            )
         )
         self.foxglove_context = foxglove.Context()
         self.agent_channel = CompressedImageChannel(
@@ -537,9 +533,7 @@ class FoxgloveTeleopBridge:
             schema=Schema(
                 name="diagnostic_msgs/msg/DiagnosticArray",
                 encoding="jsonschema",
-                data=json.dumps(
-                    DIAGNOSTIC_ARRAY_SCHEMA, separators=(",", ":")
-                ).encode(),
+                data=json.dumps(DIAGNOSTIC_ARRAY_SCHEMA, separators=(",", ":")).encode(),
             ),
             message_encoding="json",
             context=self.foxglove_context,
@@ -583,17 +577,21 @@ class FoxgloveTeleopBridge:
                 topic, payload = self.target_socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
                 return
-            try:
-                value = json.loads(payload.decode())
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                continue
             timestamp_ns = time.time_ns()
-            if topic == DEFAULT_STATUS_TOPIC and isinstance(value, dict):
+            if topic == DEFAULT_STATUS_TOPIC:
+                try:
+                    status = TeleopSourceStatus.from_json(payload)
+                except (KeyError, UnicodeDecodeError, ValueError):
+                    continue
+                value = status.to_dict()
                 self.latest_source_status = value
                 self.latest_source_at = time.monotonic()
                 self.tracker_channel.log(value, log_time=timestamp_ns)
-            elif topic == DEFAULT_TARGET_TOPIC and isinstance(value, dict):
-                target = TeleopTarget.from_dict(value)
+            elif topic == DEFAULT_TARGET_TOPIC:
+                try:
+                    target = TeleopTarget.from_json(payload)
+                except (KeyError, UnicodeDecodeError, ValueError):
+                    continue
                 self.latest_target = target
                 self.latest_target_at = time.monotonic()
                 timestamp_ns = target.host_published_unix_ns or timestamp_ns
@@ -601,7 +599,7 @@ class FoxgloveTeleopBridge:
                 self.target_pose_channel.log(
                     pose_message(
                         timestamp_ns=timestamp_ns,
-                        frame_id="teleop_target",
+                        frame_id="teleop_world",
                         position=target.position,
                         quaternion_xyzw=matrix_to_quat_xyzw(target.rotation),
                     ),
@@ -672,21 +670,15 @@ class FoxgloveTeleopBridge:
             timestamp_ns=timestamp_ns,
             source_status=self.latest_source_status,
             source_age_sec=(
-                None
-                if self.latest_source_at is None
-                else max(0.0, now - self.latest_source_at)
+                None if self.latest_source_at is None else max(0.0, now - self.latest_source_at)
             ),
             target=self.latest_target,
             target_age_sec=(
-                None
-                if self.latest_target_at is None
-                else max(0.0, now - self.latest_target_at)
+                None if self.latest_target_at is None else max(0.0, now - self.latest_target_at)
             ),
             feedback=self.latest_feedback,
             feedback_age_sec=(
-                None
-                if self.latest_feedback_at is None
-                else max(0.0, now - self.latest_feedback_at)
+                None if self.latest_feedback_at is None else max(0.0, now - self.latest_feedback_at)
             ),
         )
         self.diagnostics_channel.log(value, log_time=timestamp_ns)
@@ -726,6 +718,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not 1 <= args.port <= 65535:
+        raise ValueError("--port must be from 1 to 65535")
+    if args.duration_sec < 0:
+        raise ValueError("--duration-sec must be non-negative")
     bridge = FoxgloveTeleopBridge(
         target_endpoint=args.target_endpoint,
         feedback_endpoint=args.feedback_endpoint,

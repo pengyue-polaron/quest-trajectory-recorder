@@ -9,7 +9,6 @@ from typing import Any
 
 from .receiver import iso_now
 
-
 REMOTE_FIELDS = [
     "recv_unix",
     "recv_iso",

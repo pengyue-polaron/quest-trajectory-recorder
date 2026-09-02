@@ -55,11 +55,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    return 0 if is_foxglove_server_ready(
-        args.url,
-        timeout_sec=args.timeout_sec,
-        expected_server_name=args.expected_server_name,
-    ) else 1
+    return (
+        0
+        if is_foxglove_server_ready(
+            args.url,
+            timeout_sec=args.timeout_sec,
+            expected_server_name=args.expected_server_name,
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

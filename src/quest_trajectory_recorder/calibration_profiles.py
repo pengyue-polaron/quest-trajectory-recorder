@@ -14,12 +14,7 @@ PROFILE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 def sanitize_profile(raw: str | None, default: str) -> str:
     profile = (raw or default).strip()
     profile = profile.removesuffix(".json")
-    if (
-        not profile
-        or "/" in profile
-        or "\\" in profile
-        or not PROFILE_RE.fullmatch(profile)
-    ):
+    if not profile or "/" in profile or "\\" in profile or not PROFILE_RE.fullmatch(profile):
         raise ValueError("profile must contain only letters, numbers, '_', '-', or '.'")
     return profile
 
@@ -88,34 +83,7 @@ def calibration_health(data: Any) -> dict[str, Any]:
         # Rotation conversion handles that reflection with a basis conjugation
         # rather than treating the position basis itself as a rotation.
         if abs(determinant) < 0.95:
-            issues.append(
-                f"axes must form an orthonormal coordinate frame (det={determinant:.4f})"
-            )
-
-    rotation_norm = None
-    neutral = (
-        data.get("rotation", {}).get("neutralQuat")
-        if isinstance(data.get("rotation"), dict)
-        else None
-    )
-    if neutral is not None:
-        if not isinstance(neutral, dict):
-            issues.append("rotation.neutralQuat must be an xyzw object")
-        else:
-            try:
-                quaternion = [float(neutral[axis]) for axis in ("x", "y", "z", "w")]
-                rotation_norm = math.sqrt(sum(item * item for item in quaternion))
-                if (
-                    not all(math.isfinite(item) for item in quaternion)
-                    or rotation_norm <= 1e-6
-                ):
-                    issues.append(
-                        "rotation.neutralQuat must be finite and non-degenerate"
-                    )
-            except (KeyError, TypeError, ValueError):
-                issues.append(
-                    "rotation.neutralQuat must contain finite numeric x/y/z/w"
-                )
+            issues.append(f"axes must form an orthonormal coordinate frame (det={determinant:.4f})")
 
     return {
         "valid": not issues,
@@ -123,12 +91,5 @@ def calibration_health(data: Any) -> dict[str, Any]:
         "axis_norms": norms,
         "axis_dot_products": dot_products,
         "determinant": determinant,
-        "handedness": (
-            None
-            if determinant is None
-            else "right"
-            if determinant > 0
-            else "left"
-        ),
-        "rotation_quaternion_norm": rotation_norm,
+        "handedness": (None if determinant is None else "right" if determinant > 0 else "left"),
     }

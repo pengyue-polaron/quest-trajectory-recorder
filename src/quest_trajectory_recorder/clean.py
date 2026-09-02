@@ -28,8 +28,12 @@ def default_output_path(path: Path) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv", type=Path, help="Input *_remote.csv file.")
-    parser.add_argument("--out", type=Path, help="Output CSV path. Defaults to *_cleaned.csv next to input.")
-    parser.add_argument("--keep-origin", action="store_true", help="Keep exact 0,0,0 placeholder rows.")
+    parser.add_argument(
+        "--out", type=Path, help="Output CSV path. Defaults to *_cleaned.csv next to input."
+    )
+    parser.add_argument(
+        "--keep-origin", action="store_true", help="Keep exact 0,0,0 placeholder rows."
+    )
     parser.add_argument(
         "--max-step-m",
         type=float,
@@ -49,7 +53,9 @@ def main() -> int:
     kept_points: list[tuple[float, float, float]] = []
     dropped_origin = 0
     dropped_jump = 0
-    jump_examples: list[tuple[int, int, float, tuple[float, float, float], tuple[float, float, float]]] = []
+    jump_examples: list[
+        tuple[int, int, float, tuple[float, float, float], tuple[float, float, float]]
+    ] = []
 
     with src.open(newline="", encoding="utf-8") as input_file:
         reader = csv.DictReader(input_file)
@@ -70,7 +76,9 @@ def main() -> int:
                 if step > args.max_step_m:
                     dropped_jump += 1
                     if len(jump_examples) < 8:
-                        jump_examples.append((row_index, int(float(row.get("seq", "0"))), step, kept_points[-1], pos))
+                        jump_examples.append(
+                            (row_index, int(float(row.get("seq", "0"))), step, kept_points[-1], pos)
+                        )
                     continue
 
             kept_rows.append(row)

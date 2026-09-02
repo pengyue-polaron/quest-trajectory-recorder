@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
+import math
 import queue
 import signal
 import subprocess
@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import zmq
+from embodied_ops.teleop import TeleopSourceStatus
 from embodied_ops.teleop.zmq_transport import (
     DEFAULT_TARGET_ENDPOINT,
     DEFAULT_TARGET_TOPIC,
@@ -111,9 +112,7 @@ class _AdbHealthMonitor:
         connected = self._connected_fn()
         if connected:
             try:
-                missing_ports = sorted(
-                    set(self.required_ports) - self._reverse_ports_fn()
-                )
+                missing_ports = sorted(set(self.required_ports) - self._reverse_ports_fn())
                 if missing_ports:
                     self._setup_reverse_fn(missing_ports)
                     events.append(f"ADB reverse mappings restored: {missing_ports}")
@@ -124,9 +123,7 @@ class _AdbHealthMonitor:
             except (OSError, RuntimeError, subprocess.SubprocessError):
                 connected = False
         if connected != self._previous_connected:
-            events.append(
-                f"ADB device {'connected' if connected else 'disconnected'}."
-            )
+            events.append(f"ADB device {'connected' if connected else 'disconnected'}.")
         self._previous_connected = connected
 
         try:
@@ -161,12 +158,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Quest raw ZMQ -> simulator-neutral TeleopTarget publisher."
     )
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Raw Quest ZMQ bind host. The safe ADB-reverse default is loopback; opt into 0.0.0.0 for LAN.",
+    )
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
     parser.add_argument("--pause-port", type=int, default=DEFAULT_PORTS["pause"])
-    parser.add_argument(
-        "--resolution-port", type=int, default=DEFAULT_PORTS["resolution"]
-    )
+    parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
     parser.add_argument(
         "--no-manage-app",
         action="store_true",
@@ -175,13 +174,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--app-refocus-sec", type=float, default=10.0)
     parser.add_argument("--gripper-port", type=int, default=DEFAULT_GRIPPER_PORT)
     parser.add_argument("--adb-reverse", action="store_true")
-    parser.add_argument(
-        "--calibration", type=str, default="calibrations/quest_teleop_frame.json"
-    )
+    parser.add_argument("--calibration", type=str, default="calibrations/quest_teleop_frame.json")
     parser.add_argument("--no-gate", action="store_true")
-    parser.add_argument(
-        "--trajectory-gate-pause", choices=("High", "Low"), default="High"
-    )
+    parser.add_argument("--trajectory-gate-pause", choices=("High", "Low"), default="High")
     parser.add_argument("--allow-initial-high", action="store_true")
     parser.add_argument("--gripper-mode", choices=("toggle", "hold"), default="toggle")
     parser.add_argument(
@@ -211,6 +206,18 @@ def main() -> int:
         args.resolution_port,
         args.gripper_port,
     ]
+    if any(port < 1 or port > 65535 for port in required_ports):
+        raise ValueError("Quest ports must be integers from 1 to 65535")
+    if len(set(required_ports)) != len(required_ports):
+        raise ValueError("Quest raw-data ports must be distinct")
+    if args.print_every < 0:
+        raise ValueError("--print-every must be non-negative")
+    if args.status_every_sec < 0 or args.adb_check_sec < 0:
+        raise ValueError("status and ADB check intervals must be non-negative")
+    if args.app_refocus_sec <= 0:
+        raise ValueError("--app-refocus-sec must be positive")
+    if not math.isfinite(args.tracking_loss_grace_ms) or args.tracking_loss_grace_ms < 0:
+        raise ValueError("--tracking-loss-grace-ms must be finite and non-negative")
     if args.adb_reverse:
         if adb_connected():
             setup_adb_reverse(required_ports)
@@ -341,19 +348,14 @@ def main() -> int:
                     for event in update.events:
                         print(event, flush=True)
 
-            if (
-                args.status_every_sec > 0
-                and now - last_status_at >= args.status_every_sec
-            ):
+            if args.status_every_sec > 0 and now - last_status_at >= args.status_every_sec:
                 target_age_sec = (
                     None
                     if source.latest_target_at is None
                     else max(0.0, time.time() - source.latest_target_at)
                 )
                 raw_age_sec = (
-                    None
-                    if source.latest_raw_at is None
-                    else max(0.0, now - source.latest_raw_at)
+                    None if source.latest_raw_at is None else max(0.0, now - source.latest_raw_at)
                 )
                 valid_age_sec = (
                     None
@@ -379,40 +381,33 @@ def main() -> int:
                     state = "streaming"
                 else:
                     state = "ready"
-                status = {
-                    "schema_version": "embodied.teleop_source_status/v1",
-                    "session_id": session_id,
-                    "state": state,
-                    "timestamp_unix_ns": time.time_ns(),
-                    "target_seq": None
-                    if source.latest_target is None
-                    else source.latest_target.seq,
-                    "target_age_ms": None
-                    if target_age_sec is None
-                    else target_age_sec * 1000.0,
-                    "gate_open": source.gate_open,
-                    "control_ready": tracking_valid and source.gate_open,
-                    "controller_stream_online": raw_online,
-                    "tracking_valid": tracking_valid,
-                    "raw_age_ms": None if raw_age_sec is None else raw_age_sec * 1000.0,
-                    "valid_age_ms": (
-                        None if valid_age_sec is None else valid_age_sec * 1000.0
-                    ),
-                    "pause_state": source.pause_state,
-                    "valid_remote_count": source.remote_count,
-                    "raw_remote_count": source.raw_remote_count,
-                    "invalid_remote_count": source.invalid_remote_count,
-                    "tracking_loss_count": source.tracking_loss_count,
-                    "consecutive_invalid_count": source.consecutive_invalid_count,
-                    "tracking_loss_grace_ms": source.tracking_loss_grace_ms,
-                    "last_invalid_reason": source.last_invalid_reason,
-                    "calibration_id": calibration_id,
-                    "calibration_sha256": calibration_sha256,
-                    **device,
-                }
-                publisher.publish_status(
-                    json.dumps(status, separators=(",", ":")).encode("utf-8")
+                status = TeleopSourceStatus(
+                    source="quest",
+                    session_id=session_id,
+                    state=state,
+                    target_seq=None if source.latest_target is None else source.latest_target.seq,
+                    target_age_ms=None if target_age_sec is None else target_age_sec * 1000.0,
+                    gate_open=source.gate_open,
+                    control_ready=tracking_valid and source.gate_open,
+                    stream_online=raw_online,
+                    tracking_valid=tracking_valid,
+                    raw_age_ms=None if raw_age_sec is None else raw_age_sec * 1000.0,
+                    valid_age_ms=(None if valid_age_sec is None else valid_age_sec * 1000.0),
+                    pause_state=source.pause_state,
+                    source_metadata={
+                        "valid_remote_count": source.remote_count,
+                        "raw_remote_count": source.raw_remote_count,
+                        "invalid_remote_count": source.invalid_remote_count,
+                        "tracking_loss_count": source.tracking_loss_count,
+                        "consecutive_invalid_count": source.consecutive_invalid_count,
+                        "tracking_loss_grace_ms": source.tracking_loss_grace_ms,
+                        "last_invalid_reason": source.last_invalid_reason,
+                        "calibration_id": calibration_id,
+                        "calibration_sha256": calibration_sha256,
+                        **device,
+                    },
                 )
+                publisher.publish_status(status)
                 last_status_at = now
     finally:
         if adb_monitor is not None:

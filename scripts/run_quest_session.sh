@@ -10,7 +10,11 @@ PROFILE="${CALIBRATION_PROFILE:-quest_teleop_frame}"
 SYNTHETIC=0
 SYNTHETIC_PATTERN="axes"
 OPEN_FOXGLOVE=1
-FOXGLOVE_URL="ws://127.0.0.1:8765"
+TARGET_ENDPOINT="tcp://127.0.0.1:8130"
+FEEDBACK_ENDPOINT="tcp://127.0.0.1:8131"
+COMMAND_ENDPOINT="tcp://127.0.0.1:8132"
+FOXGLOVE_PORT=8765
+FOXGLOVE_URL=""
 ADB_WAIT_SECONDS=120
 TASK=""
 BACKEND_ARGS=()
@@ -19,22 +23,26 @@ usage() {
   cat <<'HELP'
 Usage: scripts/run_quest_session.sh --backend maniskill|mujoco [options] [-- backend-options]
 
-The session owns exactly three processes: one target source, one backend, and
-one Foxglove gateway. Foxglove is the only collection UI; all internal data and
-commands use the canonical embodied-ops ZMQ contracts.
+The session owns exactly three top-level services: one target source, one
+backend, and one Foxglove gateway. Foxglove is the only collection UI; all
+internal data and commands use the canonical embodied-ops ZMQ contracts.
 
 Options:
   --profile NAME             Required calibration profile for a physical Quest.
   --synthetic                Use deterministic targets without a controller.
   --synthetic-pattern NAME   axes, circle, or hold (default: axes).
   --task NAME                ManiSkill task: cube_sort or bar_carry.
-  --scene-seed N             ManiSkill scene seed.
-  --episode-max-steps N      Optional ManiSkill timeout; zero means manual reset only.
+  --scene-seed N             Deterministic backend scene seed.
+  --episode-max-steps N      Optional backend timeout; zero means manual reset only.
   --record                   Start recording immediately.
   --recording-root PATH      Backend recording directory.
   --orientation              Enable controller orientation mapping.
   --max-steps N              Stop after N backend steps (useful for tests).
   --no-open-foxglove         Start the gateway without opening Foxglove Desktop.
+  --target-endpoint URL      Canonical target ZMQ endpoint.
+  --feedback-endpoint URL    Canonical feedback ZMQ endpoint.
+  --command-endpoint URL     Canonical command ZMQ endpoint.
+  --foxglove-port N          Foxglove WebSocket port (default: 8765).
   --adb-wait-seconds N       Wait this long for Quest USB/ADB (default: 120).
   --                         Pass remaining arguments directly to the backend.
 
@@ -84,6 +92,22 @@ while [[ $# -gt 0 ]]; do
       ADB_WAIT_SECONDS="$2"
       shift 2
       ;;
+    --target-endpoint)
+      TARGET_ENDPOINT="$2"
+      shift 2
+      ;;
+    --feedback-endpoint)
+      FEEDBACK_ENDPOINT="$2"
+      shift 2
+      ;;
+    --command-endpoint)
+      COMMAND_ENDPOINT="$2"
+      shift 2
+      ;;
+    --foxglove-port)
+      FOXGLOVE_PORT="$2"
+      shift 2
+      ;;
     --)
       shift
       BACKEND_ARGS+=("$@")
@@ -103,6 +127,14 @@ done
 
 if [[ "$BACKEND" != "maniskill" && "$BACKEND" != "mujoco" ]]; then
   echo "--backend must be maniskill or mujoco" >&2
+  exit 2
+fi
+if [[ ! "$FOXGLOVE_PORT" =~ ^[0-9]+$ ]] || ((FOXGLOVE_PORT < 1 || FOXGLOVE_PORT > 65535)); then
+  echo "--foxglove-port must be an integer from 1 to 65535" >&2
+  exit 2
+fi
+if [[ ! "$ADB_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "--adb-wait-seconds must be a non-negative integer" >&2
   exit 2
 fi
 if [[ "$BACKEND" == "mujoco" && -n "$TASK" ]]; then
@@ -126,10 +158,25 @@ fi
 
 CHILD_PIDS=()
 cleanup() {
-  local pid
+  local pid attempt
   for pid in "${CHILD_PIDS[@]:-}"; do
     if kill -0 "$pid" >/dev/null 2>&1; then
       kill "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+  for attempt in {1..25}; do
+    local any_alive=0
+    for pid in "${CHILD_PIDS[@]:-}"; do
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        any_alive=1
+      fi
+    done
+    [[ "$any_alive" -eq 0 ]] && break
+    sleep 0.2
+  done
+  for pid in "${CHILD_PIDS[@]:-}"; do
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -KILL "$pid" >/dev/null 2>&1 || true
     fi
   done
   for pid in "${CHILD_PIDS[@]:-}"; do
@@ -141,10 +188,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 cd "$ROOT"
+FOXGLOVE_URL="ws://127.0.0.1:${FOXGLOVE_PORT}"
 if [[ "$SYNTHETIC" -eq 1 ]]; then
   "$ROOT/.venv/bin/python" -m quest_trajectory_recorder.synthetic_target \
+    --bind "$TARGET_ENDPOINT" \
     --pattern "$SYNTHETIC_PATTERN" --amplitude-m 0.015 &
-  CHILD_PIDS+=("$!")
+  SOURCE_PID="$!"
+  CHILD_PIDS+=("$SOURCE_PID")
   SOURCE_LABEL="synthetic:$SYNTHETIC_PATTERN"
 else
   CALIBRATION_PATH="$ROOT/calibrations/$PROFILE.json"
@@ -156,16 +206,23 @@ else
   "$ROOT/scripts/start_frankabot.sh" --no-install \
     --adb-wait-seconds "$ADB_WAIT_SECONDS"
   "$ROOT/scripts/run_quest_doctor.sh" --calibration "$CALIBRATION_PATH"
-  "$ROOT/scripts/run_quest_tracker_hub.sh" --profile "$PROFILE" &
-  CHILD_PIDS+=("$!")
+  "$ROOT/scripts/run_quest_tracker_hub.sh" --profile "$PROFILE" \
+    --target-bind "$TARGET_ENDPOINT" &
+  SOURCE_PID="$!"
+  CHILD_PIDS+=("$SOURCE_PID")
   SOURCE_LABEL="quest:$PROFILE"
 fi
 
+FOXGLOVE_ARGS=(
+  --target-endpoint "$TARGET_ENDPOINT"
+  --feedback-endpoint "$FEEDBACK_ENDPOINT"
+  --command-endpoint "$COMMAND_ENDPOINT"
+  --port "$FOXGLOVE_PORT"
+)
 if [[ "$OPEN_FOXGLOVE" -eq 1 ]]; then
-  "$ROOT/scripts/run_foxglove_bridge.sh" --open-foxglove &
-else
-  "$ROOT/scripts/run_foxglove_bridge.sh" &
+  FOXGLOVE_ARGS+=(--open-foxglove)
 fi
+"$ROOT/scripts/run_foxglove_bridge.sh" "${FOXGLOVE_ARGS[@]}" &
 FOXGLOVE_PID="$!"
 CHILD_PIDS+=("$FOXGLOVE_PID")
 
@@ -192,20 +249,43 @@ if [[ "$FOXGLOVE_READY" -ne 1 ]]; then
   fi
   exit 1
 fi
+if ! kill -0 "$SOURCE_PID" >/dev/null 2>&1; then
+  wait "$SOURCE_PID" || SOURCE_STATUS="$?"
+  echo "Target source exited during startup." >&2
+  exit "${SOURCE_STATUS:-1}"
+fi
 
 echo "Quest teleop session: source=$SOURCE_LABEL backend=$BACKEND"
 echo "Foxglove: $FOXGLOVE_URL (layout: Quest Unified Teleop)"
 
-if [[ "${#BACKEND_ARGS[@]}" -gt 0 ]]; then
-  "$BACKEND_LAUNCHER" "${BACKEND_ARGS[@]}" &
-else
-  "$BACKEND_LAUNCHER" &
-fi
+BACKEND_ARGS=(
+  --target-endpoint "$TARGET_ENDPOINT"
+  --feedback-endpoint "$FEEDBACK_ENDPOINT"
+  --command-endpoint "$COMMAND_ENDPOINT"
+  "${BACKEND_ARGS[@]}"
+)
+"$BACKEND_LAUNCHER" "${BACKEND_ARGS[@]}" &
 BACKEND_PID="$!"
 CHILD_PIDS+=("$BACKEND_PID")
-if wait "$BACKEND_PID"; then
-  BACKEND_STATUS=0
-else
-  BACKEND_STATUS="$?"
-fi
-exit "$BACKEND_STATUS"
+
+while true; do
+  if ! kill -0 "$SOURCE_PID" >/dev/null 2>&1; then
+    wait "$SOURCE_PID" || SOURCE_STATUS="$?"
+    SOURCE_STATUS="${SOURCE_STATUS:-0}"
+    echo "Target source exited; stopping the complete session." >&2
+    [[ "$SOURCE_STATUS" -eq 0 ]] && SOURCE_STATUS=1
+    exit "$SOURCE_STATUS"
+  fi
+  if ! kill -0 "$FOXGLOVE_PID" >/dev/null 2>&1; then
+    wait "$FOXGLOVE_PID" || FOXGLOVE_STATUS="$?"
+    FOXGLOVE_STATUS="${FOXGLOVE_STATUS:-0}"
+    echo "Foxglove gateway exited; stopping the complete session." >&2
+    [[ "$FOXGLOVE_STATUS" -eq 0 ]] && FOXGLOVE_STATUS=1
+    exit "$FOXGLOVE_STATUS"
+  fi
+  if ! kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
+    wait "$BACKEND_PID" || BACKEND_STATUS="$?"
+    exit "${BACKEND_STATUS:-0}"
+  fi
+  sleep 0.2
+done

@@ -104,15 +104,18 @@ def test_diagnostics_explain_tracking_loss_and_safe_hold() -> None:
     message = diagnostic_array(
         timestamp_ns=123,
         source_status={
+            "source": "quest",
             "state": "tracking_invalid",
-            "adb_connected": True,
-            "app_resumed": True,
-            "controller_stream_online": True,
+            "stream_online": True,
             "tracking_valid": False,
             "gate_open": True,
             "raw_age_ms": 12.0,
-            "tracking_loss_count": 2,
-            "last_invalid_reason": "zero_position",
+            "source_metadata": {
+                "adb_connected": True,
+                "app_resumed": True,
+                "tracking_loss_count": 2,
+                "last_invalid_reason": "zero_position",
+            },
         },
         source_age_sec=0.1,
         target=TeleopTarget(
@@ -173,11 +176,11 @@ def test_diagnostics_show_live_stream_and_controller_position() -> None:
     message = diagnostic_array(
         timestamp_ns=123,
         source_status={
-            "adb_connected": True,
-            "app_resumed": True,
-            "controller_stream_online": True,
+            "source": "quest",
+            "stream_online": True,
             "tracking_valid": True,
             "gate_open": True,
+            "source_metadata": {"adb_connected": True, "app_resumed": True},
         },
         source_age_sec=0.1,
         target=target,
@@ -231,14 +234,45 @@ def test_fresh_target_proves_quest_online_when_status_heartbeat_is_dropped() -> 
     assert status["values"][2]["value"] == "ONLINE"
 
 
+def test_fresh_device_status_overrides_a_recent_pre_disconnect_target() -> None:
+    target = TeleopTarget(
+        seq=9,
+        timestamp=1.0,
+        position=[0.1, 0.2, 0.3],
+        rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        gripper=-1.0,
+        gate_open=True,
+        source="quest",
+        session_id="test",
+        frame_id=9,
+    )
+    status = diagnostic_array(
+        timestamp_ns=123,
+        source_status={
+            "source": "quest",
+            "stream_online": False,
+            "tracking_valid": False,
+            "gate_open": True,
+            "source_metadata": {"adb_connected": False, "app_resumed": False},
+        },
+        source_age_sec=0.01,
+        target=target,
+        target_age_sec=0.01,
+        feedback=None,
+        feedback_age_sec=None,
+    )["status"][0]
+    assert status["message"] == "Quest offline"
+    assert status["values"][2]["value"] == "OFFLINE"
+
+
 def test_diagnostics_distinguish_paused_from_a_stale_controller_pose() -> None:
     source_status = {
-        "adb_connected": True,
-        "app_resumed": True,
-        "controller_stream_online": True,
+        "source": "quest",
+        "stream_online": True,
         "tracking_valid": True,
         "gate_open": False,
         "pause_state": "Low",
+        "source_metadata": {"adb_connected": True, "app_resumed": True},
     }
     paused = diagnostic_array(
         timestamp_ns=123,
@@ -269,12 +303,12 @@ def test_diagnostics_do_not_invent_a_b_state_before_controller_input() -> None:
     unknown = diagnostic_array(
         timestamp_ns=123,
         source_status={
-            "adb_connected": True,
-            "app_resumed": True,
-            "controller_stream_online": False,
+            "source": "quest",
+            "stream_online": False,
             "tracking_valid": False,
             "gate_open": False,
             "pause_state": None,
+            "source_metadata": {"adb_connected": True, "app_resumed": True},
         },
         source_age_sec=0.1,
         target=None,
@@ -288,12 +322,12 @@ def test_diagnostics_do_not_invent_a_b_state_before_controller_input() -> None:
     last_pressed = diagnostic_array(
         timestamp_ns=123,
         source_status={
-            "adb_connected": True,
-            "app_resumed": True,
-            "controller_stream_online": False,
+            "source": "quest",
+            "stream_online": False,
             "tracking_valid": False,
             "gate_open": True,
             "pause_state": "High",
+            "source_metadata": {"adb_connected": True, "app_resumed": True},
         },
         source_age_sec=0.1,
         target=None,
@@ -341,9 +375,7 @@ def test_open_foxglove_reuses_running_desktop_app(monkeypatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    assert open_foxglove("https://example.invalid/deep-link") == (
-        "existing Foxglove window"
-    )
+    assert open_foxglove("https://example.invalid/deep-link") == ("existing Foxglove window")
     assert calls == [["pgrep", "-x", "Foxglove"], ["open", "-a", "Foxglove"]]
 
 
@@ -356,10 +388,13 @@ def test_open_foxglove_can_force_a_new_tab(monkeypatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    assert open_foxglove(
-        "https://example.invalid/deep-link",
-        force_new_tab=True,
-    ) == "new Foxglove tab"
+    assert (
+        open_foxglove(
+            "https://example.invalid/deep-link",
+            force_new_tab=True,
+        )
+        == "new Foxglove tab"
+    )
     assert calls == [["open", "https://example.invalid/deep-link"]]
 
 
@@ -389,15 +424,13 @@ def test_live_gateway_advertises_only_canonical_topics_and_services() -> None:
         bridge.close()
 
     assert messages["serverInfo"]["capabilities"] == ["services"]
-    assert {
-        channel["topic"] for channel in messages["advertise"]["channels"]
-    } == EXPECTED_TOPICS
+    assert {channel["topic"] for channel in messages["advertise"]["channels"]} == EXPECTED_TOPICS
     diagnostics_channel = next(
         channel
         for channel in messages["advertise"]["channels"]
         if channel["topic"] == "/teleop/diagnostics"
     )
     assert diagnostics_channel["schemaName"] == "diagnostic_msgs/msg/DiagnosticArray"
-    assert {
-        service["name"] for service in messages["advertiseServices"]["services"]
-    } == set(SERVICE_COMMANDS)
+    assert {service["name"] for service in messages["advertiseServices"]["services"]} == set(
+        SERVICE_COMMANDS
+    )

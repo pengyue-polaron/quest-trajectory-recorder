@@ -9,15 +9,18 @@ fi
 export PYTHONPATH="${PWD}/src:${PYTHONPATH:-}"
 
 use_adb_reverse=1
+listen_host="127.0.0.1"
 session=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --lan|--no-adb-reverse)
       use_adb_reverse=0
+      listen_host="0.0.0.0"
       shift
       ;;
     --adb-reverse)
       use_adb_reverse=1
+      listen_host="127.0.0.1"
       shift
       ;;
     -h|--help)
@@ -82,7 +85,7 @@ echo "Recording is gated by pause state:"
 echo "  1) Make sure the Quest app is red/paused first. If it is already green, press B once to make it red."
 echo "  2) Press B to green/start, move the controller, then press B to red/stop."
 "$PYTHON" -m quest_trajectory_recorder.receiver \
-  --host 0.0.0.0 \
+  --host "$listen_host" \
   --out-dir "${capture_dir}" \
   --session "${session}" \
   --keypoint-socket pull \

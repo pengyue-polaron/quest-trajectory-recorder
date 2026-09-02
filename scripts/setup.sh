@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/.."
-EMBODIED_OPS_ROOT="${EMBODIED_OPS_ROOT:-$(cd ../embodied-ops && pwd)}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+EMBODIED_OPS_ROOT="${EMBODIED_OPS_ROOT:-$ROOT/../embodied-ops}"
+if [[ ! -f "$EMBODIED_OPS_ROOT/pyproject.toml" ]]; then
+  echo "Clone embodied-ops beside this repository or set EMBODIED_OPS_ROOT." >&2
+  exit 1
+fi
 if command -v uv >/dev/null 2>&1; then
   [[ -x .venv/bin/python ]] || uv venv --python 3.11 .venv
   uv pip install --python .venv/bin/python -e "${EMBODIED_OPS_ROOT}[teleop-zmq]"

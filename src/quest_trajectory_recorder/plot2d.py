@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 from typing import Iterable
 
-
 CAPTURE_DIR = Path("captures")
 PLOT_DIR = Path("plots")
 
@@ -26,10 +25,16 @@ def latest_remote_csv() -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot Quest controller trajectory as SVG.")
-    parser.add_argument("csv_path", nargs="?", type=Path, help="Path to *_remote.csv. Defaults to latest.")
+    parser.add_argument(
+        "csv_path", nargs="?", type=Path, help="Path to *_remote.csv. Defaults to latest."
+    )
     parser.add_argument("--out", type=Path, help="Output SVG path.")
-    parser.add_argument("--png", action="store_true", help="Also convert the SVG to PNG with macOS sips.")
-    parser.add_argument("--max-points", type=int, default=3000, help="Downsample long captures for SVG size.")
+    parser.add_argument(
+        "--png", action="store_true", help="Also convert the SVG to PNG with macOS sips."
+    )
+    parser.add_argument(
+        "--max-points", type=int, default=3000, help="Downsample long captures for SVG size."
+    )
     parser.add_argument(
         "--keep-origin",
         "--keep-leading-origin",
@@ -40,10 +45,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def is_origin(row: dict[str, float | str]) -> bool:
-    return abs(float(row["x"])) < 1e-8 and abs(float(row["y"])) < 1e-8 and abs(float(row["z"])) < 1e-8
+    return (
+        abs(float(row["x"])) < 1e-8 and abs(float(row["y"])) < 1e-8 and abs(float(row["z"])) < 1e-8
+    )
 
 
-def load_positions(path: Path, max_points: int, drop_origin: bool) -> tuple[list[dict[str, float | str]], int, int]:
+def load_positions(
+    path: Path, max_points: int, drop_origin: bool
+) -> tuple[list[dict[str, float | str]], int, int]:
     rows: list[dict[str, float | str]] = []
     with path.open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -139,12 +148,12 @@ def panel_svg(
     for i in range(6):
         x = px + pw * i / 5
         y = py + ph * i / 5
-        grid.append(f'<line x1="{x:.1f}" y1="{py}" x2="{x:.1f}" y2="{py+ph}" class="grid"/>')
-        grid.append(f'<line x1="{px}" y1="{y:.1f}" x2="{px+pw}" y2="{y:.1f}" class="grid"/>')
+        grid.append(f'<line x1="{x:.1f}" y1="{py}" x2="{x:.1f}" y2="{py + ph}" class="grid"/>')
+        grid.append(f'<line x1="{px}" y1="{y:.1f}" x2="{px + pw}" y2="{y:.1f}" class="grid"/>')
     return f"""
     <g>
       <rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="18" class="panel"/>
-      {''.join(grid)}
+      {"".join(grid)}
       <polyline points="{points}" class="trajectory"/>
       <circle cx="{start[0]:.1f}" cy="{start[1]:.1f}" r="6" class="start"/>
       <circle cx="{end[0]:.1f}" cy="{end[1]:.1f}" r="7" class="end"/>
@@ -155,7 +164,9 @@ def panel_svg(
     """
 
 
-def render_svg(rows: list[dict[str, float | str]], total_rows: int, dropped_leading_origin: int, source: Path) -> str:
+def render_svg(
+    rows: list[dict[str, float | str]], total_rows: int, dropped_leading_origin: int, source: Path
+) -> str:
     if not rows:
         raise SystemExit("No valid trajectory rows found.")
 

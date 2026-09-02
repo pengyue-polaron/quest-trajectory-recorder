@@ -133,16 +133,12 @@ class DirectQuestTargetSource:
         received_monotonic_ns: int | None = None,
     ) -> TeleopTarget | None:
         received_monotonic_ns = (
-            time.monotonic_ns()
-            if received_monotonic_ns is None
-            else received_monotonic_ns
+            time.monotonic_ns() if received_monotonic_ns is None else received_monotonic_ns
         )
         self.latest_raw_at = received_monotonic_ns / 1_000_000_000.0
         self.raw_remote_count += 1
         try:
-            remote = parse_remote_text(
-                payload.decode("utf-8", errors="replace").strip()
-            )
+            remote = parse_remote_text(payload.decode("utf-8", errors="replace").strip())
         except (TypeError, ValueError):
             remote = None
         if not valid_remote(remote):
@@ -168,9 +164,7 @@ class DirectQuestTargetSource:
                 return None
             if self.latest_raw_valid is True:
                 self.tracking_loss_count += 1
-                self.events.append(
-                    "Controller tracking lost; publishing an immediate safety hold."
-                )
+                self.events.append("Controller tracking lost; publishing an immediate safety hold.")
             self.latest_raw_valid = False
             metadata = {
                 **self.latest_target.source_metadata,

@@ -32,9 +32,7 @@ fi
 
 cd "$ROOT"
 PYTHON="${PYTHON:-python3}"
-if [[ -x .venv-libero/bin/python ]]; then
-  PYTHON=.venv-libero/bin/python
-elif [[ -x .venv/bin/python ]]; then
+if [[ -x .venv/bin/python ]]; then
   PYTHON=.venv/bin/python
 fi
 COMMAND=("$PYTHON" -m quest_trajectory_recorder.quest_tracker_hub --adb-reverse)

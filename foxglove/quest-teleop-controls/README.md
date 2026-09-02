@@ -6,7 +6,7 @@ The panel deliberately contains only three control groups:
 
 - Safety: hold and resume/re-clutch.
 - Episode: previous, reset, and next.
-- Recording: start, stop and save, and discard partial.
+- Recording: start, stop and save, and permanently discard the active take.
 
 Every action waits for the backend acknowledgement before another action can be sent. The panel does not bypass the ZMQ command plane or talk directly to ManiSkill/MuJoCo.
 

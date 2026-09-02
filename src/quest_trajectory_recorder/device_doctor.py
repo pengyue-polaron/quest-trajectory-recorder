@@ -51,24 +51,16 @@ def build_report(calibration_path: Path) -> dict[str, Any]:
         _result(
             "adb_tool",
             "pass" if adb_available else "fail",
-            (
-                adb_version.stdout.splitlines()[0]
-                if adb_available
-                else "adb is unavailable"
-            ),
+            (adb_version.stdout.splitlines()[0] if adb_available else "adb is unavailable"),
         )
     )
     state = _run("adb", "get-state") if adb_available else None
-    connected = bool(
-        state and state.returncode == 0 and state.stdout.strip() == "device"
-    )
+    connected = bool(state and state.returncode == 0 and state.stdout.strip() == "device")
     checks.append(
         _result(
             "quest_usb",
             "pass" if connected else "fail",
-            "authorized Quest/Android device"
-            if connected
-            else "no authorized ADB device",
+            "authorized Quest/Android device" if connected else "no authorized ADB device",
         )
     )
 
@@ -83,11 +75,7 @@ def build_report(calibration_path: Path) -> dict[str, Any]:
         package_text = "" if package is None else package.stdout
         installed = "versionName=" in package_text
         version_line = next(
-            (
-                line.strip()
-                for line in package_text.splitlines()
-                if "versionName=" in line
-            ),
+            (line.strip() for line in package_text.splitlines() if "versionName=" in line),
             "version unavailable",
         )
         checks.append(
@@ -100,16 +88,12 @@ def build_report(calibration_path: Path) -> dict[str, Any]:
 
         activities = _run("adb", "shell", "dumpsys", "activity", "activities")
         activity_text = "" if activities is None else activities.stdout
-        focused = (
-            QUEST_PACKAGE in activity_text and "topResumedActivity" in activity_text
-        )
+        focused = QUEST_PACKAGE in activity_text and "topResumedActivity" in activity_text
         checks.append(
             _result(
                 "frankabot_activity",
                 "pass" if focused else "warn",
-                "Unity activity is resumed"
-                if focused
-                else "APK is not currently resumed",
+                "Unity activity is resumed" if focused else "APK is not currently resumed",
             )
         )
 
@@ -138,9 +122,7 @@ def build_report(calibration_path: Path) -> dict[str, Any]:
             _result(
                 "calibration",
                 "pass" if calibration["valid"] else "fail",
-                str(calibration_path)
-                if calibration["valid"]
-                else "; ".join(calibration["issues"]),
+                str(calibration_path) if calibration["valid"] else "; ".join(calibration["issues"]),
                 health=calibration,
             )
         )

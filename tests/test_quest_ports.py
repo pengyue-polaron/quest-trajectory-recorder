@@ -41,9 +41,7 @@ def test_focus_frankabot_clears_launch_dialog_and_starts_vr_activity(
     quest_ports.focus_frankabot()
 
     assert [
-        call[-1]
-        for call in calls[:-1]
-        if call[:4] == ["adb", "shell", "am", "force-stop"]
+        call[-1] for call in calls[:-1] if call[:4] == ["adb", "shell", "am", "force-stop"]
     ] == list(QUEST_BLOCKING_PACKAGES)
     assert calls[-1] == [
         "adb",

@@ -22,13 +22,10 @@
 - `run_foxglove_bridge.sh`: canonical ZMQ streams to Foxglove WebSocket 8765.
 - `run_live3d.sh`: calibration server used by `run_calibration.sh` (HTTP 8766
   by default).
-- `run_libero_teleop.sh`: optional LIBERO backend; it consumes only the
-  canonical target stream and never binds Quest ports.
 
 ## Raw capture and offline tools
 
 - `record_once.sh`, `run_receiver.sh`: raw APK capture.
-- `setup_libero_env.sh`: optional LIBERO environment setup.
 
 Collection scripts removed from the maintained surface: the MJPEG dashboard,
 backend Operator Panels, stdin teleop commands, and the old multi-UI stack

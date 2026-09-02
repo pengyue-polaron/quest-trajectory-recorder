@@ -14,5 +14,6 @@ class ProtocolTest(unittest.TestCase):
         self.assertFalse(parsed["flag"])
         self.assertEqual(parsed["num_points"], 3)
 
+
 if __name__ == "__main__":
     unittest.main()

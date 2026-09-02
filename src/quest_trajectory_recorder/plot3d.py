@@ -11,7 +11,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 CAPTURE_DIR = Path("captures")
 PLOT_DIR = Path("plots")
 
@@ -25,12 +24,18 @@ def latest_remote_csv() -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot Quest controller trajectory as a 3D SVG.")
-    parser.add_argument("csv_path", nargs="?", type=Path, help="Path to *_remote.csv. Defaults to latest.")
+    parser.add_argument(
+        "csv_path", nargs="?", type=Path, help="Path to *_remote.csv. Defaults to latest."
+    )
     parser.add_argument("--out", type=Path, help="Output SVG path.")
-    parser.add_argument("--png", action="store_true", help="Also convert SVG to PNG with macOS sips.")
+    parser.add_argument(
+        "--png", action="store_true", help="Also convert SVG to PNG with macOS sips."
+    )
     parser.add_argument("--max-points", type=int, default=2500)
     parser.add_argument("--azimuth", type=float, default=42.0, help="Camera azimuth in degrees.")
-    parser.add_argument("--elevation", type=float, default=24.0, help="Camera elevation in degrees.")
+    parser.add_argument(
+        "--elevation", type=float, default=24.0, help="Camera elevation in degrees."
+    )
     parser.add_argument(
         "--keep-origin",
         "--keep-leading-origin",
@@ -41,10 +46,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def is_origin(row: dict[str, float | str]) -> bool:
-    return abs(float(row["x"])) < 1e-8 and abs(float(row["y"])) < 1e-8 and abs(float(row["z"])) < 1e-8
+    return (
+        abs(float(row["x"])) < 1e-8 and abs(float(row["y"])) < 1e-8 and abs(float(row["z"])) < 1e-8
+    )
 
 
-def load_positions(path: Path, max_points: int, drop_origin: bool) -> tuple[list[dict[str, float | str]], int, int]:
+def load_positions(
+    path: Path, max_points: int, drop_origin: bool
+) -> tuple[list[dict[str, float | str]], int, int]:
     rows: list[dict[str, float | str]] = []
     with path.open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -94,7 +103,9 @@ def path_length(rows: list[dict[str, float | str]]) -> float:
 
 
 class Projector:
-    def __init__(self, rows: list[dict[str, float | str]], azimuth: float, elevation: float) -> None:
+    def __init__(
+        self, rows: list[dict[str, float | str]], azimuth: float, elevation: float
+    ) -> None:
         self.az = math.radians(azimuth)
         self.el = math.radians(elevation)
         self.cx = (min(float(r["x"]) for r in rows) + max(float(r["x"]) for r in rows)) / 2
@@ -141,7 +152,9 @@ def render_svg(
     zmin, zmax = zmin - zpad, zmax + zpad
 
     # Include trajectory, box corners, and floor grid in the scale calculation.
-    points_3d: list[tuple[float, float, float]] = [(float(r["x"]), float(r["y"]), float(r["z"])) for r in rows]
+    points_3d: list[tuple[float, float, float]] = [
+        (float(r["x"]), float(r["y"]), float(r["z"])) for r in rows
+    ]
     for x in (xmin, xmax):
         for y in (ymin, ymax):
             for z in (zmin, zmax):
@@ -160,7 +173,9 @@ def render_svg(
     raw = [projector.raw_project(*p) for p in points_3d]
     umin, umax = min(p[0] for p in raw), max(p[0] for p in raw)
     vmin, vmax = min(p[1] for p in raw), max(p[1] for p in raw)
-    scale = min((width - 2 * margin) / max(umax - umin, 1e-9), (height - 190) / max(vmax - vmin, 1e-9))
+    scale = min(
+        (width - 2 * margin) / max(umax - umin, 1e-9), (height - 190) / max(vmax - vmin, 1e-9)
+    )
     ox = width / 2 - (umin + umax) * scale / 2
     oy = 500 - (vmin + vmax) * scale / 2
 
@@ -176,8 +191,20 @@ def render_svg(
     floor_lines = []
     for i in range(6):
         t = i / 5
-        floor_lines.append(line((xmin + (xmax - xmin) * t, ymin, zmin), (xmin + (xmax - xmin) * t, ymin, zmax), "grid"))
-        floor_lines.append(line((xmin, ymin, zmin + (zmax - zmin) * t), (xmax, ymin, zmin + (zmax - zmin) * t), "grid"))
+        floor_lines.append(
+            line(
+                (xmin + (xmax - xmin) * t, ymin, zmin),
+                (xmin + (xmax - xmin) * t, ymin, zmax),
+                "grid",
+            )
+        )
+        floor_lines.append(
+            line(
+                (xmin, ymin, zmin + (zmax - zmin) * t),
+                (xmax, ymin, zmin + (zmax - zmin) * t),
+                "grid",
+            )
+        )
 
     box_edges = [
         ((xmin, ymin, zmin), (xmax, ymin, zmin)),
@@ -195,7 +222,9 @@ def render_svg(
     ]
     box_svg = [line(a, b, "box") for a, b in box_edges]
 
-    projected_rows = [(project(float(r["x"]), float(r["y"]), float(r["z"])), i) for i, r in enumerate(rows)]
+    projected_rows = [
+        (project(float(r["x"]), float(r["y"]), float(r["z"])), i) for i, r in enumerate(rows)
+    ]
     segments = []
     for (a, ia), (b, ib) in zip(projected_rows, projected_rows[1:]):
         t = ib / max(len(rows) - 1, 1)
@@ -219,7 +248,9 @@ def render_svg(
     for a, b, cls, label in axes:
         axis_svg.append(line(a, b, cls))
         lx, ly, _ = project(*b)
-        axis_svg.append(f'<text x="{lx + 8:.1f}" y="{ly - 8:.1f}" class="{cls} label">{label}</text>')
+        axis_svg.append(
+            f'<text x="{lx + 8:.1f}" y="{ly - 8:.1f}" class="{cls} label">{label}</text>'
+        )
 
     duration = float(rows[-1]["recv_unix"]) - float(rows[0]["recv_unix"])
     generated = dt.datetime.now().astimezone().isoformat(timespec="seconds")
@@ -245,10 +276,10 @@ def render_svg(
   <text x="54" y="89" class="sub">source={esc(source.name)} | rows={total_rows} | plotted={len(rows)}{esc(drop_note)} | receive_span={duration:.3f}s | path_length~{path_length(rows):.3f}m | az={azimuth:.1f} | elev={elevation:.1f} | generated={esc(generated)}</text>
   <text x="54" y="116" class="sub">green=start, red=end, color gradient=sample order, axes: X red / Y green / Z blue; receive_span is local arrival time</text>
   <rect x="42" y="142" width="1116" height="666" rx="26" class="chip"/>
-  {''.join(floor_lines)}
-  {''.join(box_svg)}
-  {''.join(axis_svg)}
-  {''.join(segments)}
+  {"".join(floor_lines)}
+  {"".join(box_svg)}
+  {"".join(axis_svg)}
+  {"".join(segments)}
   <circle cx="{sx:.1f}" cy="{sy:.1f}" r="8" class="start"/>
   <circle cx="{ex:.1f}" cy="{ey:.1f}" r="9" class="end"/>
 </svg>
@@ -261,7 +292,10 @@ def main() -> int:
     rows, total_rows, dropped = load_positions(csv_path, args.max_points, not args.keep_origin)
     out_path = (args.out or (PLOT_DIR / f"{csv_path.stem}_3d.svg")).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(render_svg(rows, total_rows, dropped, csv_path, args.azimuth, args.elevation), encoding="utf-8")
+    out_path.write_text(
+        render_svg(rows, total_rows, dropped, csv_path, args.azimuth, args.elevation),
+        encoding="utf-8",
+    )
     print(out_path)
     if args.png:
         sips = shutil.which("sips")

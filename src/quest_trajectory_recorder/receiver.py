@@ -14,13 +14,11 @@ import csv
 import datetime as dt
 import json
 import signal
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import zmq
-
 
 DEFAULT_PORTS = {
     "keypoints": 8087,
@@ -115,7 +113,9 @@ def decode_frame(payload: bytes, channel: str) -> dict[str, Any]:
     return record
 
 
-def make_socket(context: zmq.Context[zmq.Socket], host: str, port: int, socket_type: int) -> zmq.Socket:
+def make_socket(
+    context: zmq.Context[zmq.Socket], host: str, port: int, socket_type: int
+) -> zmq.Socket:
     socket = context.socket(socket_type)
     socket.setsockopt(zmq.LINGER, 0)
     socket.setsockopt(zmq.RCVHWM, 10000)
@@ -123,7 +123,9 @@ def make_socket(context: zmq.Context[zmq.Socket], host: str, port: int, socket_t
     return socket
 
 
-def write_keypoint_rows(writer: csv.DictWriter, base: dict[str, Any], parsed: dict[str, Any]) -> None:
+def write_keypoint_rows(
+    writer: csv.DictWriter, base: dict[str, Any], parsed: dict[str, Any]
+) -> None:
     for joint_index, point in enumerate(parsed["points"]):
         writer.writerow(
             {
@@ -138,7 +140,9 @@ def write_keypoint_rows(writer: csv.DictWriter, base: dict[str, Any], parsed: di
         )
 
 
-def write_remote_row(writer: csv.DictWriter, base: dict[str, Any], remote: dict[str, Any], text: str) -> None:
+def write_remote_row(
+    writer: csv.DictWriter, base: dict[str, Any], remote: dict[str, Any], text: str
+) -> None:
     row: dict[str, Any] = {
         **base,
         "kind": remote["kind"],
@@ -165,9 +169,8 @@ def summarize(seq: int, channel: str, decoded: dict[str, Any]) -> str:
     parsed = decoded.get("parsed")
     if parsed:
         wrist = parsed["points"][0] if parsed["points"] else None
-        return (
-            f"#{seq} {channel}: {parsed['kind']} {parsed['num_points']} pts"
-            + (f" wrist=({wrist[0]:.4f},{wrist[1]:.4f},{wrist[2]:.4f})" if wrist else "")
+        return f"#{seq} {channel}: {parsed['kind']} {parsed['num_points']} pts" + (
+            f" wrist=({wrist[0]:.4f},{wrist[1]:.4f},{wrist[2]:.4f})" if wrist else ""
         )
     remote = decoded.get("remote")
     if remote:
@@ -183,7 +186,11 @@ def summarize(seq: int, channel: str, decoded: dict[str, Any]) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Receive Quest controller ZMQ frames.")
-    parser.add_argument("--host", default="0.0.0.0", help="ZMQ bind host. Use 0.0.0.0 for LAN.")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="ZMQ bind host. The safe ADB-reverse default is loopback; opt into 0.0.0.0 for LAN.",
+    )
     parser.add_argument("--keypoint-port", type=int, default=DEFAULT_PORTS["keypoints"])
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
     parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
@@ -352,10 +359,15 @@ def main() -> int:
         if not pending_events:
             return
         now = time.time()
-        if not force and args.event_print_interval_sec > 0 and now - last_event_print < args.event_print_interval_sec:
+        if (
+            not force
+            and args.event_print_interval_sec > 0
+            and now - last_event_print < args.event_print_interval_sec
+        ):
             return
         summary = ", ".join(
-            f"{channel} {text!r} x{count}" for (channel, text), count in pending_events.most_common(6)
+            f"{channel} {text!r} x{count}"
+            for (channel, text), count in pending_events.most_common(6)
         )
         print(f"{iso_now()} events: {summary}", flush=True)
         pending_events.clear()
@@ -401,7 +413,11 @@ def main() -> int:
                 ready = dict(poller.poll(timeout=250))
                 now = time.time()
                 if not ready:
-                    if seen_trajectory and args.stop_idle_sec > 0 and now - last_trajectory_time >= args.stop_idle_sec:
+                    if (
+                        seen_trajectory
+                        and args.stop_idle_sec > 0
+                        and now - last_trajectory_time >= args.stop_idle_sec
+                    ):
                         flush_event_summary(force=True)
                         print(
                             f"{iso_now()} auto-stop: no trajectory frames for {now - last_trajectory_time:.2f}s",
@@ -431,7 +447,9 @@ def main() -> int:
                         "port": port,
                         **decoded,
                     }
-                    raw_file.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    raw_file.write(
+                        json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+                    )
                     raw_file.flush()
 
                     event_base = {
@@ -475,7 +493,9 @@ def main() -> int:
                         if args.event_print_interval_sec == 0:
                             print(f"{recv_iso} {summarize(seq, channel, decoded)}", flush=True)
                         else:
-                            pending_events[(channel, decoded.get("text", f"{decoded['bytes']} raw bytes"))] += 1
+                            pending_events[
+                                (channel, decoded.get("text", f"{decoded['bytes']} raw bytes"))
+                            ] += 1
                             flush_event_summary()
 
                     last_message = recv_unix
@@ -491,7 +511,10 @@ def main() -> int:
                     ):
                         consecutive_stop_pause += 1
                         no_data_for = recv_unix - last_trajectory_time
-                        if consecutive_stop_pause >= args.stop_pause_count and no_data_for >= args.stop_no_data_sec:
+                        if (
+                            consecutive_stop_pause >= args.stop_pause_count
+                            and no_data_for >= args.stop_no_data_sec
+                        ):
                             flush_event_summary(force=True)
                             print(
                                 f"{recv_iso} auto-stop: pause={args.stop_on_pause!r} "
@@ -505,7 +528,10 @@ def main() -> int:
     finally:
         flush_event_summary(force=True)
         if discarded_trajectory:
-            print(f"{iso_now()} discarded trajectory frames before gate: {discarded_trajectory}", flush=True)
+            print(
+                f"{iso_now()} discarded trajectory frames before gate: {discarded_trajectory}",
+                flush=True,
+            )
         for socket in sockets:
             poller.unregister(socket)
             socket.close(0)

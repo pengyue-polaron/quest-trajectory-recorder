@@ -1,11 +1,10 @@
 from pathlib import Path
 
 import pytest
+from embodied_ops.teleop import build_axis_map, matrix_to_quat_xyzw
 
 from quest_trajectory_recorder.teleop_frame import (
-    build_axis_map,
     load_quest_calibration,
-    matrix_to_quat_xyzw,
     quat_xyzw_to_matrix,
     quest_pos_to_teleop,
     quest_rotation_to_teleop_matrix,
@@ -31,9 +30,7 @@ def test_quest_calibration_maps_origin_relative_axes(tmp_path: Path):
         encoding="utf-8",
     )
     calibration = load_quest_calibration(path)
-    assert quest_pos_to_teleop([1.2, 1.7, 3.5], calibration) == pytest.approx(
-        [0.2, -0.3, 0.5]
-    )
+    assert quest_pos_to_teleop([1.2, 1.7, 3.5], calibration) == pytest.approx([0.2, -0.3, 0.5])
 
 
 def test_target_from_remote_round_trips_json():
@@ -63,15 +60,11 @@ def test_target_from_remote_round_trips_json():
 
 def test_remote_validation_rejects_zero_nonfinite_and_invalid_rotation():
     assert valid_remote({"position": [0.1, 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 1.0]})
-    assert not valid_remote(
-        {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]}
-    )
+    assert not valid_remote({"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]})
     assert not valid_remote(
         {"position": [float("nan"), 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 1.0]}
     )
-    assert not valid_remote(
-        {"position": [0.1, 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 0.0]}
-    )
+    assert not valid_remote({"position": [0.1, 0.2, 0.3], "rotation": [0.0, 0.0, 0.0, 0.0]})
 
 
 def test_target_decoder_rejects_payload_without_canonical_schema():
@@ -101,9 +94,7 @@ def test_build_axis_map_detects_degenerate_axes():
 def test_rotation_matrix_quaternion_round_trip():
     quaternion = [0.2, -0.3, 0.1, 0.92]
     restored = matrix_to_quat_xyzw(quat_xyzw_to_matrix(quaternion))
-    normalized = [
-        value / sum(item * item for item in quaternion) ** 0.5 for value in quaternion
-    ]
+    normalized = [value / sum(item * item for item in quaternion) ** 0.5 for value in quaternion]
     assert restored == pytest.approx(normalized)
 
 
@@ -123,12 +114,9 @@ def test_left_handed_quest_basis_still_emits_proper_rotation(tmp_path: Path):
     calibration = load_quest_calibration(path)
     rotation = quest_rotation_to_teleop_matrix([0.2, -0.3, 0.1, 0.92], calibration)
     determinant = (
-        rotation[0][0]
-        * (rotation[1][1] * rotation[2][2] - rotation[1][2] * rotation[2][1])
-        - rotation[0][1]
-        * (rotation[1][0] * rotation[2][2] - rotation[1][2] * rotation[2][0])
-        + rotation[0][2]
-        * (rotation[1][0] * rotation[2][1] - rotation[1][1] * rotation[2][0])
+        rotation[0][0] * (rotation[1][1] * rotation[2][2] - rotation[1][2] * rotation[2][1])
+        - rotation[0][1] * (rotation[1][0] * rotation[2][2] - rotation[1][2] * rotation[2][0])
+        + rotation[0][2] * (rotation[1][0] * rotation[2][1] - rotation[1][1] * rotation[2][0])
     )
 
     assert determinant == pytest.approx(1.0)
