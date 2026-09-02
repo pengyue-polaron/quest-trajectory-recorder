@@ -120,6 +120,10 @@ axes, tracking focus, B-button clutch, trigger, or calibration.
 The official SDK gateway listens exclusively at `ws://127.0.0.1:8765`. The
 session launcher requires a Foxglove-protocol handshake before starting the
 backend, so an unrelated HTTP listener cannot be mistaken for a ready gateway.
+If Foxglove Desktop is already running, the launcher activates its existing
+window instead of creating another reconnecting tab. Use
+`--new-foxglove-tab` on the low-level bridge only when a separate tab is
+intentional.
 The organization
 layout is `Quest Unified Teleop` (`lay_0eaTLQSSPmExnWfB`); its versioned export
 is `foxglove/quest_teleop.foxglove-layout.json`.

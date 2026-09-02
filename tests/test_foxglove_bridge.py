@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 from embodied_ops.teleop import TeleopCommandResult, TeleopFeedback, TeleopTarget
 from foxglove.messages import PoseInFrame
@@ -13,6 +14,7 @@ from quest_trajectory_recorder.foxglove_bridge import (
     diagnostic_array,
     feedback_telemetry,
     foxglove_deep_link,
+    open_foxglove,
     pose_message,
 )
 
@@ -287,6 +289,37 @@ def test_deep_link_selects_organization_layout_and_local_bridge() -> None:
     assert "ds.url=ws%3A%2F%2F127.0.0.1%3A8765" in link
     assert f"layoutId={DEFAULT_FOXGLOVE_LAYOUT_ID}" in link
     assert "openIn=desktop" in link
+
+
+def test_open_foxglove_reuses_running_desktop_app(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert open_foxglove("https://example.invalid/deep-link") == (
+        "existing Foxglove window"
+    )
+    assert calls == [["pgrep", "-x", "Foxglove"], ["open", "-a", "Foxglove"]]
+
+
+def test_open_foxglove_can_force_a_new_tab(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert open_foxglove(
+        "https://example.invalid/deep-link",
+        force_new_tab=True,
+    ) == "new Foxglove tab"
+    assert calls == [["open", "https://example.invalid/deep-link"]]
 
 
 def test_live_gateway_advertises_only_canonical_topics_and_services() -> None:

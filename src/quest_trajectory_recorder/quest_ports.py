@@ -8,6 +8,12 @@ from typing import Any
 DEFAULT_GRIPPER_PORT = 8127
 QUEST_PACKAGE = "com.Xigbee.FrankaBot"
 QUEST_ACTIVITY = "com.unity3d.player.UnityPlayerActivity"
+QUEST_VR_CATEGORY = "com.oculus.intent.category.VR"
+QUEST_BLOCKING_PACKAGES = (
+    "com.oculus.firsttimenux",
+    "com.oculus.panelapp.library",
+    "com.oculus.store",
+)
 
 
 def setup_adb_reverse(ports: list[int]) -> None:
@@ -89,7 +95,7 @@ def focus_frankabot(*, close_panels: bool = True) -> None:
     if not adb_connected():
         raise RuntimeError("Quest is not connected through ADB")
     if close_panels:
-        for package in ("com.oculus.panelapp.library", "com.oculus.store"):
+        for package in QUEST_BLOCKING_PACKAGES:
             subprocess.run(
                 ["adb", "shell", "am", "force-stop", package],
                 check=False,
@@ -103,6 +109,11 @@ def focus_frankabot(*, close_panels: bool = True) -> None:
             "shell",
             "am",
             "start",
+            "-S",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            QUEST_VR_CATEGORY,
             "-n",
             f"{QUEST_PACKAGE}/{QUEST_ACTIVITY}",
             "--es",

@@ -87,6 +87,9 @@ old controller pose.
 
 Meta may put a controller into `CONNECTED_INACTIVE` when the headset is not
 worn. ADB can still look healthy in that state, but 6DoF input is unavailable.
+The launcher clears Oculus first-time/system dialogs that can otherwise block
+an ADB-started VR activity, then starts FrankaBot explicitly in the Quest VR
+category. The health monitor repeats the same recovery after a focus loss.
 Foxglove's native Diagnostics panel shows only the B-button streaming state,
 the live controller pose, and whether Quest is online. Its headline also makes
 tracking loss or a stalled backend immediately visible.

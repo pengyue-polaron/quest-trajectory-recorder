@@ -438,6 +438,28 @@ def foxglove_deep_link(*, websocket_url: str, layout_id: str = "") -> str:
     return f"https://app.foxglove.dev/~/view?{urlencode(parameters)}"
 
 
+def open_foxglove(deep_link: str, *, force_new_tab: bool = False) -> str:
+    """Open the operator view without accumulating duplicate desktop tabs."""
+
+    running = False
+    if not force_new_tab:
+        try:
+            running = (
+                subprocess.run(
+                    ["pgrep", "-x", "Foxglove"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                ).returncode
+                == 0
+            )
+        except FileNotFoundError:
+            pass
+    command = ["open", "-a", "Foxglove"] if running else ["open", deep_link]
+    subprocess.run(command, check=False)
+    return "existing Foxglove window" if running else "new Foxglove tab"
+
+
 class FoxgloveTeleopBridge:
     def __init__(
         self,
@@ -680,6 +702,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open-foxglove", action="store_true")
     parser.add_argument(
+        "--new-foxglove-tab",
+        action="store_true",
+        help="Open a new deep-link tab even when Foxglove Desktop is already running.",
+    )
+    parser.add_argument(
         "--layout-id",
         default=DEFAULT_FOXGLOVE_LAYOUT_ID,
         help="Remote Foxglove layout ID to select; pass an empty string to omit it.",
@@ -712,7 +739,11 @@ def main(argv: list[str] | None = None) -> int:
             websocket_url=url,
             layout_id=args.layout_id,
         )
-        subprocess.run(["open", deep_link], check=False)
+        opened = open_foxglove(
+            deep_link,
+            force_new_tab=args.new_foxglove_tab,
+        )
+        print(f"Foxglove UI: activated {opened}.", flush=True)
     started = time.monotonic()
     try:
         while not stop and (

@@ -119,15 +119,18 @@ adb shell svc power stayon true >/dev/null 2>&1 || true
 adb shell am broadcast -a com.oculus.vrpowermanager.prox_close >/dev/null 2>&1 || true
 
 if [[ "${LAUNCH}" -eq 1 ]]; then
-  echo "Launching ${PACKAGE}..."
-  adb shell am start -n "${PACKAGE}/${ACTIVITY}" --es unity "-force-gles" | tr -d '\r'
   if [[ "${CLOSE_PANELS}" -eq 1 ]]; then
-    echo "Closing Oculus panel overlays and refocusing ${PACKAGE}..."
+    echo "Closing Oculus launch-blocking dialogs..."
+    adb shell am force-stop com.oculus.firsttimenux >/dev/null 2>&1 || true
     adb shell am force-stop com.oculus.panelapp.library >/dev/null 2>&1 || true
     adb shell am force-stop com.oculus.store >/dev/null 2>&1 || true
-    sleep 1
-    adb shell am start -n "${PACKAGE}/${ACTIVITY}" --es unity "-force-gles" >/dev/null
   fi
+  echo "Launching ${PACKAGE} as a VR activity..."
+  adb shell am start -S \
+    -a android.intent.action.MAIN \
+    -c com.oculus.intent.category.VR \
+    -n "${PACKAGE}/${ACTIVITY}" \
+    --es unity "-force-gles" | tr -d '\r'
 fi
 
 echo
