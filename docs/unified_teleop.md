@@ -65,6 +65,12 @@ ADB, authorization, APK/activity, reverse ports, and calibration geometry.
 Physical pose signs, trigger behavior, and human-operable gains still require a
 controller-in-hand check.
 
+Quest/Unity reports controller poses in a left-handed world frame. Position
+calibration intentionally preserves the operator's physical right, forward,
+and up directions even when that basis has determinant -1. Controller
+orientations use a full basis conjugation, so the canonical target still emits
+a proper determinant-1 rotation for robotics backends.
+
 ## No-controller validation
 
 The same launcher can substitute a deterministic canonical target publisher:

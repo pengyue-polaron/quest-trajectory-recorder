@@ -38,3 +38,18 @@ def test_calibration_file_and_complete():
     assert not calibration_complete(profile)
     assert any("orthogonal" in issue for issue in calibration_health(profile)["issues"])
     assert not calibration_complete({"origin": {}, "right": {}})
+
+
+def test_left_handed_quest_position_frame_is_valid():
+    profile = {
+        "origin": {"x": 0, "y": 0, "z": 0},
+        "right": {"x": 1, "y": 0, "z": 0},
+        "forward": {"x": 0, "y": 0, "z": 1},
+        "up": {"x": 0, "y": 1, "z": 0},
+    }
+
+    health = calibration_health(profile)
+
+    assert health["valid"] is True
+    assert health["determinant"] == pytest.approx(-1.0)
+    assert health["handedness"] == "left"

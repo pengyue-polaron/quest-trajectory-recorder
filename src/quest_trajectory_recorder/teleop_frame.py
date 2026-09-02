@@ -157,12 +157,23 @@ def matrix_to_quat_xyzw(matrix: Any) -> list[float]:
 def quest_rotation_to_teleop_matrix(
     quat: Any, calibration: QuestCalibration | None
 ) -> list[list[float]]:
-    """Map a Quest controller quaternion into the calibrated teleop frame."""
+    """Map a Quest controller quaternion into a proper teleop rotation.
+
+    Quest / Unity uses a left-handed world frame, while downstream robotics
+    backends use right-handed frames.  The captured position basis may
+    therefore have determinant -1.  Conjugating by the basis changes both the
+    world and controller coordinate representation and preserves det=+1;
+    merely left-multiplying would turn every pose into an improper reflection.
+    """
     quest_rot = quat_xyzw_to_matrix(quat)
     if calibration is None:
-        return quest_rot
-    quest_to_teleop = [calibration.right, calibration.forward, calibration.up]
-    return _matmul(quest_to_teleop, quest_rot)
+        quest_to_teleop = [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]
+    else:
+        quest_to_teleop = [calibration.right, calibration.forward, calibration.up]
+    return _matmul(
+        _matmul(quest_to_teleop, quest_rot),
+        _transpose(quest_to_teleop),
+    )
 
 
 def build_axis_map(

@@ -8,6 +8,7 @@ from quest_trajectory_recorder.teleop_frame import (
     matrix_to_quat_xyzw,
     quat_xyzw_to_matrix,
     quest_pos_to_teleop,
+    quest_rotation_to_teleop_matrix,
 )
 from quest_trajectory_recorder.teleop_target import TeleopTarget, target_from_remote
 
@@ -87,3 +88,30 @@ def test_rotation_matrix_quaternion_round_trip():
         value / sum(item * item for item in quaternion) ** 0.5 for value in quaternion
     ]
     assert restored == pytest.approx(normalized)
+
+
+def test_left_handed_quest_basis_still_emits_proper_rotation(tmp_path: Path):
+    path = tmp_path / "quest.json"
+    path.write_text(
+        """
+        {
+          "origin": {"x": 0, "y": 0, "z": 0},
+          "right": {"x": 1, "y": 0, "z": 0},
+          "forward": {"x": 0, "y": 0, "z": 1},
+          "up": {"x": 0, "y": 1, "z": 0}
+        }
+        """,
+        encoding="utf-8",
+    )
+    calibration = load_quest_calibration(path)
+    rotation = quest_rotation_to_teleop_matrix([0.2, -0.3, 0.1, 0.92], calibration)
+    determinant = (
+        rotation[0][0]
+        * (rotation[1][1] * rotation[2][2] - rotation[1][2] * rotation[2][1])
+        - rotation[0][1]
+        * (rotation[1][0] * rotation[2][2] - rotation[1][2] * rotation[2][0])
+        + rotation[0][2]
+        * (rotation[1][0] * rotation[2][1] - rotation[1][1] * rotation[2][0])
+    )
+
+    assert determinant == pytest.approx(1.0)

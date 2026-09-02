@@ -82,9 +82,14 @@ def calibration_health(data: Any) -> dict[str, Any]:
             - r[1] * (f[0] * u[2] - f[2] * u[0])
             + r[2] * (f[0] * u[1] - f[1] * u[0])
         )
-        if determinant < 0.95:
+        # Quest / Unity world coordinates are left-handed.  A position frame
+        # captured as physical right, forward, and up is therefore commonly a
+        # reflection (det=-1), which is valid for mapping displacement vectors.
+        # Rotation conversion handles that reflection with a basis conjugation
+        # rather than treating the position basis itself as a rotation.
+        if abs(determinant) < 0.95:
             issues.append(
-                f"axes must form a right-handed frame (det={determinant:.4f})"
+                f"axes must form an orthonormal coordinate frame (det={determinant:.4f})"
             )
 
     rotation_norm = None
@@ -118,5 +123,12 @@ def calibration_health(data: Any) -> dict[str, Any]:
         "axis_norms": norms,
         "axis_dot_products": dot_products,
         "determinant": determinant,
+        "handedness": (
+            None
+            if determinant is None
+            else "right"
+            if determinant > 0
+            else "left"
+        ),
         "rotation_quaternion_norm": rotation_norm,
     }
