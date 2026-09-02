@@ -226,7 +226,7 @@ HTML = r"""<!doctype html>
         <div class="card subtle">
           <div class="label">Command for this profile</div>
           <pre id="liberoCommand" class="command-box">scripts/run_quest_tracker_hub.sh --profile libero_default
-scripts/run_libero_teleop.sh --profile libero_default --input-source target --orientation</pre>
+scripts/run_libero_teleop.sh --orientation</pre>
           <div class="small" style="margin-top:8px;">Stop this web tool before launching LIBERO; both bind the same Quest ports.</div>
         </div>
 
@@ -369,12 +369,9 @@ function profileStateText() {
 function updateLaunchCommand() {
   const profile = sanitizeProfileName(profileNameInput.value || currentProfile);
   const rotationFlag = hasRotationNeutral() ? ' --orientation' : '';
-  liberoCommandEl.textContent = `# preferred split pipeline
+  liberoCommandEl.textContent = `# canonical ZMQ pipeline
 scripts/run_quest_tracker_hub.sh --profile ${profile}
-scripts/run_libero_teleop.sh --profile ${profile} --input-source target --task-suite-name libero_spatial --task-id 0${rotationFlag}
-
-# quick direct mode
-scripts/run_libero_teleop.sh --profile ${profile} --task-suite-name libero_spatial --task-id 0${rotationFlag}`;
+scripts/run_libero_teleop.sh --task-suite-name libero_spatial --task-id 0${rotationFlag}`;
 }
 function nextCalibrationAction() {
   if (!latestRaw && !isCalibrated()) return 'Start Quest streaming. Press B until Stream shows High, then begin calibration.';

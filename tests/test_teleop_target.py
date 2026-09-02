@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from quest_trajectory_recorder.teleop_frame import build_axis_map, load_quest_calibration, quest_pos_to_teleop
+from quest_trajectory_recorder.teleop_frame import (
+    build_axis_map,
+    load_quest_calibration,
+    matrix_to_quat_xyzw,
+    quat_xyzw_to_matrix,
+    quest_pos_to_teleop,
+)
 from quest_trajectory_recorder.teleop_target import TeleopTarget, target_from_remote
 
 
@@ -20,7 +26,9 @@ def test_quest_calibration_maps_origin_relative_axes(tmp_path: Path):
         encoding="utf-8",
     )
     calibration = load_quest_calibration(path)
-    assert quest_pos_to_teleop([1.2, 1.7, 3.5], calibration) == pytest.approx([0.2, -0.3, 0.5])
+    assert quest_pos_to_teleop([1.2, 1.7, 3.5], calibration) == pytest.approx(
+        [0.2, -0.3, 0.5]
+    )
 
 
 def test_target_from_remote_round_trips_json():
@@ -42,13 +50,40 @@ def test_target_from_remote_round_trips_json():
     assert decoded.flag is True
     assert decoded.gate_open is True
     assert decoded.source == "unit"
+    assert decoded.schema_version == "embodied.teleop_target/v1"
+    assert decoded.controller_id == "right"
+    assert decoded.frame_id == 11
+    assert decoded.host_received_monotonic_ns is not None
+
+
+def test_target_decoder_rejects_payload_without_canonical_schema():
+    with pytest.raises(ValueError, match="unsupported teleop target schema"):
+        TeleopTarget.from_dict(
+            {
+                "seq": 1,
+                "timestamp": 10.0,
+                "position": [0, 0, 0],
+                "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                "gripper": -1,
+                "gate_open": False,
+            }
+        )
 
 
 def test_build_axis_map_detects_degenerate_axes():
-    assert build_axis_map("+y", "+x", "+z") == [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
-    try:
+    assert build_axis_map("+y", "+x", "+z") == [
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+    with pytest.raises(ValueError):
         build_axis_map("+x", "+x", "+z")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected duplicate axes to fail")
+
+
+def test_rotation_matrix_quaternion_round_trip():
+    quaternion = [0.2, -0.3, 0.1, 0.92]
+    restored = matrix_to_quat_xyzw(quat_xyzw_to_matrix(quaternion))
+    normalized = [
+        value / sum(item * item for item in quaternion) ** 0.5 for value in quaternion
+    ]
+    assert restored == pytest.approx(normalized)

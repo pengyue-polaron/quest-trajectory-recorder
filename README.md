@@ -1,13 +1,19 @@
 # Quest Trajectory Recorder
 
-A lightweight Quest controller tracking toolkit for calibration, recording, and simulator teleoperation. The preferred runtime path publishes a calibrated simulator-neutral `TeleopTarget` stream, then lets LIBERO, Isaac Sim, or another backend subscribe to that stream.
+A lightweight Quest controller tracking toolkit for calibration and input-device
+adaptation. The preferred runtime path publishes the source-neutral
+`embodied.teleop_target/v1` contract from `embodied-ops`; ManiSkill, MuJoCo,
+LIBERO, or another backend subscribes without importing this repository. The
+read-only observation gateway shows the backend's Agent view and wrist camera.
 
 The codebase is split into small runtime modules: `receiver.py` parses Quest
 frames, `teleop_frame.py` applies saved calibration profiles,
-`teleop_target.py` defines the simulator-neutral target schema,
-`quest_tracker_hub.py` can publish that target stream, and simulator backends
-such as `libero_teleop.py` consume it. See `docs/architecture.md` for the full
-module map.
+`teleop_target.py` adapts Quest-specific metadata into the shared schema, and
+`quest_tracker_hub.py` publishes that target stream. Shared transport contracts
+and geometry live in the sibling `embodied-ops` repository. Foxglove is the
+only collection observation and control UI; the browser page is retained only
+for Quest calibration.
+See `docs/architecture.md` for the full module map.
 
 ## Supported Quest Application
 
@@ -44,29 +50,41 @@ The recorder uses the host receive time (`recv_unix`, `recv_iso`). The Quest app
 | `8127` | Quest -> host | Franka gripper trigger events, when emitted by the APK |
 | `8095` | Quest -> host | Resolution state (`High` / `Low`) |
 | `8100` | Quest -> host | Pause / recording gate state (`High` / `Low`) |
-| `8087` | Quest -> host | Open-Teach hand keypoints, if using a hand-keypoint APK |
-| `8089` | host -> local subscribers | Open-Teach-style transformed frame, produced by the optional bridge |
-| `8093` | host -> local subscribers | Open-Teach-style resolution topic, produced by the optional bridge |
-| `8102` | host -> local subscribers | Open-Teach-style pause topic, produced by the optional bridge |
 | `8130` | host -> local subscribers | Simulator-neutral `TeleopTarget` PUB stream, produced by `quest-tracker-hub` |
+| `8131` | backend -> observers | Action-aligned feedback plus Agent/wrist JPEG frames |
+| `8132` | UI <-> backend | Acknowledged Hold/reset/recording operator commands |
+| `8765` | Foxglove -> host | Official Foxglove SDK WebSocket gateway |
 
-## Installation
+## Decoupled ManiSkill / MuJoCo workflow
+
+The end-to-end launcher, no-controller synthetic validation, recording layout,
+safety behavior, and physical-controller checklist are documented in
+[`docs/unified_teleop.md`](docs/unified_teleop.md).
+
+The maintained flow is one supervised command:
 
 ```bash
-cd ~/Codespace/quest-trajectory-recorder
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
+scripts/run_quest_session.sh --backend maniskill --profile desk --task cube_sort --record
+# or
+scripts/run_quest_session.sh --backend mujoco --profile desk --record
 ```
 
-Alternatively:
+The launcher owns the target source, selected backend, and Foxglove gateway as
+one process group. The organization layout `Quest Unified Teleop` connects to
+`ws://127.0.0.1:8765`. For a no-controller test, replace `--profile desk` with
+`--synthetic`. See [`scripts/README.md`](scripts/README.md) for the intentionally
+small script surface.
+
+## Installation
 
 ```bash
 cd ~/Codespace/quest-trajectory-recorder
 scripts/setup.sh
 source .venv/bin/activate
 ```
+
+`scripts/setup.sh` installs the sibling `../embodied-ops` checkout first. Set
+`EMBODIED_OPS_ROOT` if the repositories are not siblings.
 
 For ADB reverse mode, install Android platform tools and enable USB debugging on the Quest headset.
 
@@ -243,8 +261,6 @@ scripts/run_quest_tracker_hub.sh --profile libero_default
 
 # Shell B: LIBERO consumes TeleopTarget instead of raw Quest ports
 scripts/run_libero_teleop.sh \
-  --profile libero_default \
-  --input-source target \
   --task-suite-name libero_spatial \
   --task-id 0
 ```
@@ -335,24 +351,6 @@ Without installing console scripts:
 PYTHONPATH=src python -m quest_trajectory_recorder.receiver --help
 ```
 
-## Open-Teach Bridge
-
-The optional bridge republishes the controller-tracking stream as Open-Teach-style PUB/SUB topics:
-
-```bash
-quest-openteach-bridge --conflate
-```
-
-It maps:
-
-| Input | Output |
-| --- | --- |
-| `8125` controller pose | `8089`, topic `transformed_hand_frame` |
-| `8095` resolution state | `8093`, topic `button` |
-| `8100` pause state | `8102`, topic `pause` |
-
-The bridge is intended for live Open-Teach-style consumers. For complete trajectory capture, use `scripts/record_once.sh`, `scripts/run_live3d.sh`, or `quest-receive`.
-
 ## Controller Pose Protocol
 
 The controller-tracking Quest application sends pose frames as UTF-8 text:
@@ -367,12 +365,11 @@ Observed auxiliary endpoint mapping:
 - `point2` is approximately `-local Y`.
 - `point0` is approximately `-local Z`.
 
-The viewer and Open-Teach bridge primarily use the quaternion for orientation; the auxiliary points are retained in the CSV for validation.
+The calibration viewer uses the quaternion for orientation; the auxiliary
+points are retained in raw CSV captures for validation.
 
 ## References
 
 - Open-Teach: https://github.com/aadhithya14/Open-Teach
-- Open-Teach network configuration: https://github.com/aadhithya14/Open-Teach/blob/main/configs/network.yaml
-- Open-Teach VR documentation: https://github.com/aadhithya14/Open-Teach/blob/main/docs/vr.md
 - LIBERO benchmark: https://github.com/Lifelong-Robot-Learning/LIBERO
 - robosuite human demonstration collection: https://github.com/ARISE-Initiative/robosuite

@@ -8,9 +8,13 @@ version = "0.1.0"
 description = "Robust receiver and plotting tools for the controller-tracking Quest APK / Quest trajectory streams."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["pyzmq>=25"]
+dependencies = ["embodied-ops[teleop-zmq]>=0.9,<0.10", "pyzmq>=25"]
 authors = [{ name = "Pengyue" }]
-license = { text = "MIT" }
+license = "MIT"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "websockets>=15,<18"]
+foxglove = ["foxglove-sdk>=0.27,<0.28"]
 
 [project.scripts]
 quest-receive = "quest_trajectory_recorder.receiver:main"
@@ -20,8 +24,10 @@ quest-plot2d = "quest_trajectory_recorder.plot2d:main"
 quest-plot3d = "quest_trajectory_recorder.plot3d:main"
 quest-live3d = "quest_trajectory_recorder.live3d:main"
 quest-tracker-hub = "quest_trajectory_recorder.quest_tracker_hub:main"
-quest-openteach-bridge = "quest_trajectory_recorder.openteach_bridge:main"
 quest-libero-teleop = "quest_trajectory_recorder.libero_teleop:main"
+quest-synthetic-target = "quest_trajectory_recorder.synthetic_target:main"
+quest-doctor = "quest_trajectory_recorder.device_doctor:main"
+quest-foxglove-bridge = "quest_trajectory_recorder.foxglove_bridge:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

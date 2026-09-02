@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PROFILE="${1:-${CALIBRATION_PROFILE:-libero_default}}"
+PROFILE="${1:-${CALIBRATION_PROFILE:-quest_teleop_frame}}"
 CALIBRATION_PATH="$ROOT/calibrations/${PROFILE}.json"
 
 cd "$ROOT"

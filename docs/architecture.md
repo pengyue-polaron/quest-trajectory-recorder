@@ -1,66 +1,84 @@
-# Repository Architecture
+# Repository architecture
 
-The repo is organized around one data path: a Quest controller-tracking APK streams pose/button frames to the Mac, and local tools either record, visualize, calibrate, or drive LIBERO from those frames.
+This repository is the Quest input-device and session-composition layer. It
+does not implement ManiSkill or MuJoCo control policy.
 
-## Runtime modules
+## Maintained runtime
+
+```text
+raw Quest APK ports
+  -> Quest parser + named calibration
+  -> embodied.teleop_target/v1 on ZMQ 8130
+  -> backend-owned mapper/safety/recorder
+  -> embodied.teleop_feedback/v1 on ZMQ 8131
+  -> Foxglove gateway on WebSocket 8765
+
+Foxglove service
+  -> embodied.teleop_command/v1 on ZMQ 8132
+  -> backend validation/application
+  -> embodied.teleop_command_result/v1
+  -> Foxglove service response
+```
+
+The calibration browser is source-owned and exists only before collection.
+Foxglove is the sole collection UI. The removed Dashboard and Quest Operator
+Panels are not alternate production paths.
+
+## Module ownership
 
 | Module | Role |
 | --- | --- |
-| `receiver.py` | Low-level ZMQ receiver, text protocol parser, and CSV row writer. |
-| `quest_ports.py` | Shared Quest app port constants and ADB reverse helper. |
-| `live_state.py` | In-memory live stream state, SSE broadcast queues, and capture CSV schemas. |
-| `calibration_profiles.py` | Named calibration profile paths, validation, and safe profile-name handling. |
-| `teleop_frame.py` | Simulator-agnostic calibration math: Quest world -> `[right, forward, up]`. |
-| `teleop_target.py` | Neutral `TeleopTarget` schema for calibrated pose, rotation, gripper, buttons, and stream state. |
-| `quest_target_source.py` | Transport adapters: raw Quest ZMQ -> target, and target PUB/SUB subscriber. |
-| `quest_tracker_hub.py` | Standalone raw Quest receiver that publishes calibrated `TeleopTarget` messages for any backend. |
-| `live3d_web.py` | Browser calibration/settings UI and HTTP API for snapshots, SSE events, and profile files. |
-| `live3d.py` | Thin CLI entry point that wires ZMQ sockets, live state, recording, and the web server. |
-| `libero_teleop.py` | LIBERO backend that can consume direct Quest ports or the decoupled `TeleopTarget` stream. |
-| `openteach_bridge.py` | Optional compatibility bridge from the controller stream to Open-Teach-style PUB topics. |
-| `analyze.py`, `clean.py`, `plot2d.py`, `plot3d.py` | Offline inspection and plotting utilities for captured CSV files. |
+| `receiver.py` | Raw APK text parser and raw CSV capture. |
+| `quest_ports.py` | Quest port constants and ADB reverse helpers. |
+| `calibration_profiles.py`, `teleop_frame.py` | Named profile validation and Quest-to-teleop geometry. |
+| `teleop_target.py` | Raw Quest frame to canonical `TeleopTarget`. |
+| `quest_target_source.py` | Raw Quest socket ownership and controller gate/gripper state. |
+| `quest_tracker_hub.py` | Canonical target/status ZMQ publisher. |
+| `synthetic_target.py` | Deterministic canonical source for tests. |
+| `device_doctor.py` | Read-only ADB/APK/port/calibration readiness. |
+| `foxglove_bridge.py` | Canonical ZMQ observer/command client mapped to Foxglove SDK topics/services. |
+| `live3d.py`, `live3d_web.py` | Quest-only calibration UI and profile writer. |
+| `libero_teleop.py` | Optional LIBERO backend consuming canonical ZMQ only. |
 
-## Calibration data model
+Shared schemas, geometry, and transport are imported directly from
+`embodied_ops.teleop`. This repository contains no compatibility re-export and
+does not accept Quest-prefixed target schemas.
 
-Named profiles live under `calibrations/<profile>.json` and are intentionally ignored by git. A profile records:
-
-- `right`, `forward`, `up`: Quest / Unity world vectors defining the teleop frame.
-- `origin`: controller position that maps to the LIBERO initial EEF pose.
-- `rotation.neutralQuat`: optional controller quaternion that maps to the initial LIBERO gripper orientation.
-- `rotation.gripperAxis`: optional controller local axis treated as the physical gripper / approach arrow.
-
-The browser UI saves the exact file that `scripts/run_quest_tracker_hub.sh --profile <profile>` and `scripts/run_libero_teleop.sh --profile <profile>` later consume. Avoid adding parallel calibration formats unless there is a clear migration path.
-
-## Typical flows
-
-### Calibrate and inspect
+## Repository dependency direction
 
 ```text
+embodied-ops canonical contracts + ZMQ
+  <- Quest source/session composition
+  <- RobotTeamBench ManiSkill backend
+  <- ForceVLA MuJoCo backend
+```
+
+Neither backend imports this repository. The source owns APK parsing and
+calibration. Each backend owns clutching, freshness watchdog, workspace/action
+limits, task resets, native actions, cameras, recording, and command ACKs.
+
+## Primary commands
+
+```bash
 scripts/run_calibration.sh <profile>
-  -> scripts/start_frankabot.sh --no-install
-  -> quest-live3d --adb-reverse --calibration-out calibrations/<profile>.json
-  -> live3d.py wires ZMQ + live3d_web.py
+scripts/run_quest_session.sh --backend maniskill --profile <profile> --task cube_sort --record
+scripts/run_quest_session.sh --backend mujoco --profile <profile> --record
 ```
 
-### Teleoperate via decoupled target hub
+`run_quest_session.sh` is the composition root. It starts one target source,
+one backend, and one Foxglove gateway, and terminates the complete child set on
+exit. Low-level component scripts remain for diagnosis and focused tests; see
+`scripts/README.md`.
 
-```text
-scripts/run_quest_tracker_hub.sh --profile <profile>
-  -> raw Quest ZMQ + calibration profile
-  -> publishes TeleopTarget on tcp://127.0.0.1:8130 topic teleop_target
+## Extension rules
 
-scripts/run_libero_teleop.sh --profile <profile> --input-source target [--orientation]
-  -> TeleopTargetSubscriber
-  -> LIBERO-specific workspace/action mapping only
-  -> drives robosuite OSC_POSE
-```
-
-Use the hub flow when adding Isaac Sim, a recorder, a policy process, or ROS2; each consumer subscribes to the same calibrated target instead of competing for the raw Quest ports.
-
-## Extension points
-
-- Add new simulator targets next to `libero_teleop.py`, but make them consume `TeleopTarget` from `quest_target_source.py` rather than raw Quest APK frames.
-- Add new Quest APK protocol variants in `receiver.py` or a sibling parser module; do not bake parser assumptions into UI code.
-- Add browser controls in `live3d_web.py` only when they change calibration/settings. Keep socket and recording logic in `live3d.py` / `live_state.py`.
-- Add task-specific workspace-box calibration as a backend layer that maps calibrated `TeleopTarget.position` into simulator-safe EEF bounds, rather than replacing the base right/forward/up profile.
-- Add ROS2 as an adapter around `TeleopTarget` (`PoseStamped`, `Joy`, optional `/tf`) when true robot or rosbag integration is needed; do not move the core calibration math into ROS2-only code.
+- New input devices publish the canonical `TeleopTarget`; they do not add
+  source-specific fields to the top-level schema.
+- New backends import `embodied_ops.teleop` directly and never bind Quest raw
+  ports.
+- New collection controls become idempotent ZMQ commands acknowledged by the
+  backend before Foxglove reports success.
+- Device calibration stays with the source; task/workspace calibration stays
+  with the backend.
+- A second UI or second control transport requires an explicit operational
+  need; it is not added as a convenience fallback.

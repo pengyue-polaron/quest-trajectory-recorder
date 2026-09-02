@@ -14,7 +14,7 @@ This repository keeps a small split pipeline:
 ```text
 Quest controller -> FrankaBot APK -> ADB reverse ZMQ 8125/8100
   -> quest-tracker-hub -> TeleopTarget stream
-  -> quest-libero-teleop --input-source target
+  -> quest-libero-teleop
   -> LIBERO robosuite OSC_POSE action -> MuJoCo viewer on the Mac
 ```
 
@@ -32,7 +32,7 @@ This writes:
 calibrations/libero_default.json
 ```
 
-That file contains `origin`, `right`, `forward`, and `up` in Quest / Unity world coordinates. Use one profile per physical setup, for example `desk_front.json`, `neck_mount_lab.json`, or `libero_default.json`. `scripts/run_libero_teleop.sh --profile <name>` reads the same file, so the LIBERO controller uses the coordinate frame you already verified in the web diagnostic UI.
+That file contains `origin`, `right`, `forward`, and `up` in Quest / Unity world coordinates. Use one profile per physical setup, for example `desk_front.json`, `neck_mount_lab.json`, or `libero_default.json`. The tracker hub is the only process that reads this file; LIBERO receives the already-calibrated canonical target.
 
 The web calibration UI can also load and save these profiles directly. Reopen
 the viewer, choose a saved profile from the `Profile` section, and click `Load
@@ -88,10 +88,10 @@ neutral pose that maps that arrow to LIBERO's initial downward gripper pose:
 4. Hold the controller in the neutral gripper pose you want to correspond to the initial LIBERO EEF orientation.
 5. Click `Save neutral rotation`.
 
-When LIBERO is launched with `--orientation`, this saved neutral quaternion is
-used as the controller rotation zero. Without it, rotation falls back to the
-current controller orientation on the first clutch, which is useful for testing
-but less repeatable.
+When LIBERO is launched with `--orientation`, it re-clutches relative rotation
+to the first fresh gated target. The saved neutral quaternion remains useful in
+the calibration viewer, while backend runtime state stays independent of Quest
+profile files.
 
 In the rotation view, the black `gripper` arrow is shown in the calibrated
 teleop frame. Immediately after saving neutral rotation and holding still, it
@@ -107,8 +107,6 @@ scripts/run_quest_tracker_hub.sh --profile libero_default
 
 # Shell B: LIBERO subscribes to the calibrated TeleopTarget stream
 scripts/run_libero_teleop.sh \
-  --profile libero_default \
-  --input-source target \
   --task-suite-name libero_spatial \
   --task-id 0
 ```
@@ -119,8 +117,6 @@ Enable rotation after xyz translation and trigger control feel correct:
 
 ```bash
 scripts/run_libero_teleop.sh \
-  --profile libero_default \
-  --input-source target \
   --task-suite-name libero_spatial \
   --task-id 0 \
   --orientation
@@ -141,13 +137,13 @@ Useful tuning flags:
 
 ```bash
 # Slower and safer translation
-scripts/run_libero_teleop.sh --profile robotics_lab --input-source target --position-scale 0.6 --position-action-gain 8
+scripts/run_libero_teleop.sh --position-scale 0.6 --position-action-gain 8
 
 # Enable controller rotation after xyz feels correct
-scripts/run_libero_teleop.sh --profile robotics_lab --input-source target --orientation
+scripts/run_libero_teleop.sh --orientation
 
 # If the overlay arrow uses the wrong robosuite local gripper axis
-scripts/run_libero_teleop.sh --profile robotics_lab --input-source target --orientation --target-gripper-axis -z
+scripts/run_libero_teleop.sh --orientation --target-gripper-axis -z
 
 # If trigger should close only while held instead of toggling
 scripts/run_quest_tracker_hub.sh --profile robotics_lab --gripper-mode hold

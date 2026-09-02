@@ -1,0 +1,228 @@
+{
+  "configById": {
+    "Image!quest-agent": {
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "synchronize": false,
+      "imageMode": {
+        "imageTopic": "/teleop/agent_view",
+        "rotation": 0,
+        "flipHorizontal": false,
+        "flipVertical": false,
+        "rectifyImage": false,
+        "publish": {"clickEnabled": false, "hoverEnabled": false}
+      },
+      "foxglovePanelTitle": "Agent view"
+    },
+    "Image!quest-wrist": {
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "synchronize": false,
+      "imageMode": {
+        "imageTopic": "/teleop/wrist_camera",
+        "rotation": 0,
+        "flipHorizontal": false,
+        "flipVertical": false,
+        "rectifyImage": false,
+        "publish": {"clickEnabled": false, "hoverEnabled": false}
+      },
+      "foxglovePanelTitle": "Wrist camera"
+    },
+    "3D!quest-eef": {
+      "cameraState": {
+        "distance": 1.2,
+        "perspective": true,
+        "phi": 0.6,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": 0.7,
+        "fovy": 45,
+        "near": 0.01,
+        "far": 100
+      },
+    "followMode": "follow-none",
+      "fixedFrame": "teleop_world",
+    "scene": {
+      "backgroundColor": "#101615",
+      "labelScaleFactor": 0.2,
+      "transforms": {"showLabel": false}
+    },
+      "transforms": {},
+      "topics": {
+        "/teleop/eef_pose": {"visible": true},
+        "/teleop/desired_eef_pose": {"visible": true}
+      },
+      "layers": {
+        "quest-grid": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Workspace grid",
+          "instanceId": "quest-grid",
+          "layerId": "foxglove.Grid",
+          "size": 1.2,
+          "divisions": 12,
+          "lineWidth": 1,
+          "color": "#52645f",
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0],
+          "order": 1,
+          "frameId": "teleop_world"
+        }
+      },
+      "foxglovePanelTitle": "EEF / desired EEF"
+    },
+    "RawMessages!quest-telemetry": {
+      "topicPath": "/teleop/telemetry",
+      "diffTopicPath": "",
+      "diffMethod": "custom",
+      "diffEnabled": false,
+      "showFullMessageForDiff": false,
+      "foxglovePanelTitle": "Teleop status / timing / action"
+    },
+    "CallService!quest-hold": {
+      "serviceName": "/teleop/hold",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "HOLD",
+      "buttonTooltip": "Zero Cartesian motion and release the clutch home",
+      "buttonColor": "#d32f2f",
+      "editingMode": false,
+      "foxglovePanelTitle": "Safety hold"
+    },
+    "CallService!quest-resume": {
+      "serviceName": "/teleop/resume",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "RESUME / RE-CLUTCH",
+      "buttonTooltip": "Resume from the current controller and EEF poses",
+      "buttonColor": "#2e7d32",
+      "editingMode": false,
+      "foxglovePanelTitle": "Resume"
+    },
+    "CallService!quest-previous": {
+      "serviceName": "/teleop/episode/previous",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "PREVIOUS",
+      "buttonTooltip": "Load the previous episode seed where supported",
+      "buttonColor": "#455a64",
+      "editingMode": false,
+      "foxglovePanelTitle": "Previous episode"
+    },
+    "CallService!quest-reset": {
+      "serviceName": "/teleop/episode/reset",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "RESET",
+      "buttonTooltip": "Reset the current episode seed",
+      "buttonColor": "#ef6c00",
+      "editingMode": false,
+      "foxglovePanelTitle": "Reset episode"
+    },
+    "CallService!quest-next": {
+      "serviceName": "/teleop/episode/next",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "NEXT",
+      "buttonTooltip": "Load the next episode seed",
+      "buttonColor": "#1565c0",
+      "editingMode": false,
+      "foxglovePanelTitle": "Next episode"
+    },
+    "CallService!quest-record": {
+      "serviceName": "/teleop/recording/start",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "START RECORDING",
+      "buttonTooltip": "Start a synchronized action/camera episode",
+      "buttonColor": "#6a1b9a",
+      "editingMode": false,
+      "foxglovePanelTitle": "Recording"
+    },
+    "CallService!quest-stop-record": {
+      "serviceName": "/teleop/recording/stop",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "STOP RECORDING",
+      "buttonTooltip": "Finalize the current synchronized episode",
+      "buttonColor": "#6a1b9a",
+      "editingMode": false,
+      "foxglovePanelTitle": "Finalize recording"
+    },
+    "CallService!quest-discard-record": {
+      "serviceName": "/teleop/recording/discard",
+      "requestPayload": "{}",
+      "layout": "vertical",
+      "buttonText": "DISCARD PARTIAL",
+      "buttonTooltip": "Retain the current episode as explicitly incomplete",
+      "buttonColor": "#c62828",
+      "editingMode": false,
+      "foxglovePanelTitle": "Discard recording"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "linkedGlobalVariables": [],
+  "playbackConfig": {"speed": 1, "messageOrder": "receiveTime"},
+  "layout": {
+    "direction": "row",
+    "first": {
+      "direction": "column",
+      "first": "Image!quest-agent",
+      "second": "Image!quest-wrist",
+      "splitPercentage": 50
+    },
+    "second": {
+      "direction": "column",
+      "first": {
+        "direction": "row",
+        "first": "3D!quest-eef",
+        "second": "RawMessages!quest-telemetry",
+        "splitPercentage": 55
+      },
+      "second": {
+        "direction": "row",
+        "first": {
+          "direction": "column",
+          "first": "CallService!quest-hold",
+          "second": "CallService!quest-resume",
+          "splitPercentage": 50
+        },
+        "second": {
+          "direction": "row",
+          "first": "CallService!quest-previous",
+          "second": {
+            "direction": "column",
+            "first": "CallService!quest-reset",
+            "second": {
+              "direction": "row",
+              "first": "CallService!quest-next",
+              "second": {
+                "direction": "column",
+                "first": "CallService!quest-record",
+                "second": {
+                  "direction": "row",
+                  "first": "CallService!quest-stop-record",
+                  "second": "CallService!quest-discard-record",
+                  "splitPercentage": 50
+                },
+                "splitPercentage": 50
+              },
+              "splitPercentage": 50
+            },
+            "splitPercentage": 50
+          },
+          "splitPercentage": 34
+        },
+        "splitPercentage": 28
+      },
+      "splitPercentage": 76
+    },
+    "splitPercentage": 58
+  }
+}

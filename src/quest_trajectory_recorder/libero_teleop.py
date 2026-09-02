@@ -1,10 +1,4 @@
-#!/usr/bin/env python3
-"""Teleoperate a LIBERO / robosuite Panda from Quest-derived TeleopTarget data.
-
-This can read the Quest APK ports directly for compatibility, or subscribe to a
-separate quest-tracker-hub publisher so simulator backends do not own raw Quest
-transport details.
-"""
+"""Teleoperate a LIBERO / robosuite Panda from the canonical ZMQ target stream."""
 
 from __future__ import annotations
 
@@ -19,30 +13,18 @@ from pathlib import Path
 from typing import Any
 
 import zmq
-
-from .quest_target_source import (
+from embodied_ops.teleop import TeleopTarget
+from embodied_ops.teleop.zmq_transport import (
     DEFAULT_TARGET_ENDPOINT,
-    DEFAULT_TARGET_TOPIC,
-    DirectQuestTargetSource,
     TeleopTargetSubscriber,
-    newest_from_socket,
 )
-from .quest_ports import DEFAULT_GRIPPER_PORT, setup_adb_reverse
-from .receiver import DEFAULT_PORTS
+
 from .teleop_frame import (
     AXIS_NAMES,
     AXIS_VECTORS,
-    QuestCalibration,
     build_axis_map,
-    load_quest_calibration,
-    quest_pos_to_teleop,
-    quest_rotation_to_teleop_matrix,
-    quat_xyzw_to_matrix,
     resolve_gripper_axis,
 )
-from .teleop_target import TeleopTarget, valid_remote
-
-# Some moved helpers are re-exported from this module for older local scripts.
 
 try:  # Optional at import time; required only when running LIBERO.
     import numpy as np
@@ -165,9 +147,9 @@ def setup_libero_imports(openpi_root: Path, config_dir: Path) -> None:
 
 def make_libero_env(args: argparse.Namespace) -> tuple[Any, str, Any | None]:
     setup_libero_imports(Path(args.openpi_root).expanduser(), Path(args.libero_config_dir).expanduser())
+    import libero.libero.envs.bddl_utils as BDDLUtils  # type: ignore
     from libero.libero import benchmark, get_libero_path  # type: ignore
     from libero.libero.envs import TASK_MAPPING  # type: ignore
-    import libero.libero.envs.bddl_utils as BDDLUtils  # type: ignore
     from robosuite import load_controller_config  # type: ignore
 
     benchmark_dict = benchmark.get_benchmark_dict()
@@ -306,7 +288,7 @@ def project_world_to_pixel(env: Any, point: Any, camera_name: str, width: int, h
     v = fy * (p_cam[1] / p_cam[2]) + height / 2.0
     if not (math.isfinite(u) and math.isfinite(v)):
         return None
-    return int(round(u)), int(round(v))
+    return round(u), round(v)
 
 
 def render_debug_view(env: Any, debug: DebugSnapshot, *, enabled: bool, window_name: str, target_gripper_axis: str) -> None:
@@ -374,29 +356,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--control-freq", type=int, default=20)
 
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
-    parser.add_argument("--pause-port", type=int, default=DEFAULT_PORTS["pause"])
-    parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
-    parser.add_argument("--gripper-port", type=int, default=DEFAULT_GRIPPER_PORT)
-    parser.add_argument("--adb-reverse", action="store_true")
-    parser.add_argument(
-        "--input-source",
-        choices=("direct", "target"),
-        default="direct",
-        help="direct reads Quest APK ports; target subscribes to quest-tracker-hub TeleopTarget.",
-    )
     parser.add_argument("--target-endpoint", default=DEFAULT_TARGET_ENDPOINT)
-    parser.add_argument("--target-topic", default=DEFAULT_TARGET_TOPIC)
-    parser.add_argument("--no-gate", action="store_true", help="Ignore B/stream gate and always teleoperate.")
-    parser.add_argument("--trajectory-gate-pause", choices=("High", "Low"), default="High")
-    parser.add_argument(
-        "--allow-initial-high",
-        action="store_true",
-        help="Start teleop immediately if the Quest stream is already High. By default, release B once before clutching.",
-    )
-
-    parser.add_argument("--calibration", type=Path, default=Path("calibrations/quest_teleop_frame.json"))
     parser.add_argument("--libero-right-axis", choices=tuple(AXIS_VECTORS), default="-y")
     parser.add_argument("--libero-forward-axis", choices=tuple(AXIS_VECTORS), default="+x")
     parser.add_argument("--libero-up-axis", choices=tuple(AXIS_VECTORS), default="+z")
@@ -417,7 +377,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-orientation", dest="orientation", action="store_false", help="Only control xyz + gripper. This is the default.")
     parser.add_argument("--smoothing", type=float, default=0.35, help="EMA on absolute target position, 0 disables.")
     parser.add_argument("--max-action", type=float, default=1.0)
-    parser.add_argument("--gripper-mode", choices=("toggle", "hold"), default="toggle")
     parser.add_argument("--print-every", type=int, default=20)
     return parser.parse_args()
 
@@ -426,19 +385,6 @@ def main() -> int:
     args = parse_args()
     npx = _require_numpy()
 
-    if args.adb_reverse and args.input_source == "direct":
-        setup_adb_reverse([args.remote_port, args.pause_port, args.resolution_port, args.gripper_port])
-    elif args.adb_reverse:
-        print("Note: --adb-reverse is ignored with --input-source target; run it on quest-tracker-hub instead.", flush=True)
-
-    calibration = load_quest_calibration(args.calibration)
-    if calibration is None:
-        print(f"Warning: no calibration loaded from {args.calibration}; using raw fallback axes.", flush=True)
-        if args.home_mode == "calibration-origin":
-            args.home_mode = "clutch-current"
-            print("Warning: --home-mode calibration-origin requires calibration; falling back to clutch-current.", flush=True)
-    else:
-        print(f"Loaded Quest teleop calibration: {args.calibration}", flush=True)
     teleop_to_libero = build_teleop_to_libero(args.libero_right_axis, args.libero_forward_axis, args.libero_up_axis)
     print(
         "Teleop axes -> LIBERO xyz: "
@@ -482,29 +428,15 @@ def main() -> int:
         )
 
     context = zmq.Context()
-    if args.input_source == "target":
-        source = TeleopTargetSubscriber(context=context, endpoint=args.target_endpoint, topic=args.target_topic)
-        print(f"Subscribing to TeleopTarget stream: {args.target_endpoint} topic={args.target_topic!r}", flush=True)
-    else:
-        source = DirectQuestTargetSource(
-            context=context,
-            host=args.host,
-            remote_port=args.remote_port,
-            pause_port=args.pause_port,
-            calibration=calibration,
-            no_gate=args.no_gate,
-            trajectory_gate_pause=args.trajectory_gate_pause,
-            allow_initial_high=args.allow_initial_high,
-            gripper_mode=args.gripper_mode,
-        )
-        print("Reading Quest APK ports directly. For decoupled simulators, run quest-tracker-hub and use --input-source target.", flush=True)
+    source = TeleopTargetSubscriber(context=context, endpoint=args.target_endpoint)
+    print(f"Subscribing to canonical TeleopTarget stream: {args.target_endpoint}", flush=True)
 
     latest_target: TeleopTarget | None = None
     latest_target_at: float | None = None
     latest_quest_pos: Any | None = None
     remote_count = 0
     pause_state: str | None = None
-    gate_open = bool(args.no_gate)
+    gate_open = False
     home: TeleopHome | None = None
     gripper = -1.0
     step_idx = 0
@@ -526,8 +458,6 @@ def main() -> int:
         while not stop:
             was_gate_open = gate_open
             target = source.poll(max(1, int(1000 / args.control_freq)))
-            for event in source.take_events():
-                print(event, flush=True)
             if target is not None:
                 latest_target = target
                 latest_target_at = target.timestamp
@@ -537,9 +467,9 @@ def main() -> int:
                 gate_open = target.gate_open
                 gripper = target.gripper
             elif latest_target is not None:
-                gate_open = bool(getattr(source, "gate_open", latest_target.gate_open))
-                gripper = float(getattr(source, "gripper", latest_target.gripper))
-                pause_state = getattr(source, "pause_state", pause_state)
+                gate_open = latest_target.gate_open
+                gripper = latest_target.gripper
+                pause_state = latest_target.pause_state
 
             if gate_open and not was_gate_open and args.home_mode == "clutch-current":
                 home = None
@@ -551,12 +481,8 @@ def main() -> int:
                 if home is None:
                     qpos = npx.asarray(latest_target.position, dtype=float)
                     qrot_current = npx.asarray(latest_target.rotation, dtype=float)
-                    if args.home_mode == "calibration-origin" and calibration is not None and calibration.rotation_neutral is not None:
-                        qrot = npx.asarray(quest_rotation_to_teleop_matrix(calibration.rotation_neutral, calibration), dtype=float)
-                        rotation_home = "saved-neutral"
-                    else:
-                        qrot = qrot_current
-                        rotation_home = "current-controller"
+                    qrot = qrot_current
+                    rotation_home = "current-controller"
                     eef_pos = npx.asarray(obs["robot0_eef_pos"], dtype=float)
                     eef_rot = current_grip_site_rot(env)
                     home = make_home(
@@ -633,8 +559,8 @@ def main() -> int:
     finally:
         try:
             env.close()
-        except Exception:
-            pass
+        except (OSError, RuntimeError) as exc:
+            print(f"LIBERO close warning: {exc}", file=sys.stderr)
         source.close()
         context.term()
     return 0

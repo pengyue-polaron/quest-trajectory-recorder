@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+import time
 
 import zmq
 
 from .receiver import parse_remote_text
 from .teleop_frame import QuestCalibration
 from .teleop_target import TeleopTarget, target_from_remote, valid_remote
-
-DEFAULT_TARGET_ENDPOINT = "tcp://127.0.0.1:8130"
-DEFAULT_TARGET_TOPIC = "teleop_target"
 
 
 def newest_from_socket(socket: zmq.Socket) -> bytes | None:
@@ -38,6 +35,9 @@ class DirectQuestTargetSource:
         trajectory_gate_pause: str,
         allow_initial_high: bool,
         gripper_mode: str,
+        session_id: str = "unspecified",
+        calibration_id: str | None = None,
+        calibration_sha256: str | None = None,
     ) -> None:
         self.context = context
         self.calibration = calibration
@@ -45,6 +45,9 @@ class DirectQuestTargetSource:
         self.trajectory_gate_pause = trajectory_gate_pause
         self.allow_initial_high = allow_initial_high
         self.gripper_mode = gripper_mode
+        self.session_id = session_id
+        self.calibration_id = calibration_id
+        self.calibration_sha256 = calibration_sha256
         self.events: list[str] = []
         self.pause_state: str | None = None
         self.gate_open = bool(no_gate)
@@ -53,6 +56,8 @@ class DirectQuestTargetSource:
         self.gripper = -1.0
         self.prev_flag = False
         self.remote_count = 0
+        self.raw_remote_count = 0
+        self.invalid_remote_count = 0
         self.latest_target: TeleopTarget | None = None
         self.latest_target_at: float | None = None
         self.remote_socket = context.socket(zmq.PULL)
@@ -87,16 +92,20 @@ class DirectQuestTargetSource:
     def _update_pause(self, state: str) -> None:
         self.pause_state = state
         was_open = self.gate_open
-        if self.no_gate:
-            next_gate_open = True
-        elif state == self.trajectory_gate_pause and self.gate_armed:
+        if self.no_gate or state == self.trajectory_gate_pause and self.gate_armed:
             next_gate_open = True
         else:
             next_gate_open = False
             if state != self.trajectory_gate_pause:
                 self.gate_armed = True
-        if state == self.trajectory_gate_pause and not self.gate_armed and not self.initial_high_warned:
-            self.events.append("Stream is already High; release B once, then press B again to clutch.")
+        if (
+            state == self.trajectory_gate_pause
+            and not self.gate_armed
+            and not self.initial_high_warned
+        ):
+            self.events.append(
+                "Stream is already High; release B once, then press B again to clutch."
+            )
             self.initial_high_warned = True
         self.gate_open = next_gate_open
         if self.gate_open and not was_open:
@@ -105,11 +114,16 @@ class DirectQuestTargetSource:
             self.events.append("Teleop clutch released; robot holds position.")
 
     def _update_remote(self, payload: bytes) -> TeleopTarget | None:
+        received_monotonic_ns = time.monotonic_ns()
+        self.raw_remote_count += 1
         try:
-            remote = parse_remote_text(payload.decode("utf-8", errors="replace").strip())
+            remote = parse_remote_text(
+                payload.decode("utf-8", errors="replace").strip()
+            )
         except (TypeError, ValueError):
             remote = None
         if not valid_remote(remote):
+            self.invalid_remote_count += 1
             return None
         flag = bool(remote.get("flag"))
         if self.gate_open:
@@ -128,6 +142,10 @@ class DirectQuestTargetSource:
             gate_open=self.gate_open,
             pause_state=self.pause_state,
             remote_count=self.remote_count,
+            session_id=self.session_id,
+            received_monotonic_ns=received_monotonic_ns,
+            calibration_id=self.calibration_id,
+            calibration_sha256=self.calibration_sha256,
         )
         self.latest_target = target
         self.latest_target_at = target.timestamp
@@ -140,45 +158,3 @@ class DirectQuestTargetSource:
             except (KeyError, zmq.ZMQError):
                 pass
             socket.close(0)
-
-
-class TeleopTargetSubscriber:
-    """Subscribe to a simulator-neutral target stream from quest-tracker-hub."""
-
-    def __init__(self, *, context: zmq.Context, endpoint: str, topic: str = DEFAULT_TARGET_TOPIC) -> None:
-        self.context = context
-        self.topic = topic.encode("utf-8")
-        self.socket = context.socket(zmq.SUB)
-        self.socket.setsockopt(zmq.LINGER, 0)
-        self.socket.setsockopt(zmq.RCVHWM, 1)
-        self.socket.setsockopt(zmq.SUBSCRIBE, self.topic)
-        self.socket.connect(endpoint)
-        self.poller = zmq.Poller()
-        self.poller.register(self.socket, zmq.POLLIN)
-        self.latest_target: TeleopTarget | None = None
-
-    def poll(self, timeout_ms: int) -> TeleopTarget | None:
-        ready = dict(self.poller.poll(timeout=timeout_ms))
-        if self.socket not in ready:
-            return None
-        latest: TeleopTarget | None = None
-        while True:
-            try:
-                topic, payload = self.socket.recv_multipart(flags=zmq.NOBLOCK)
-            except zmq.Again:
-                break
-            if topic == self.topic:
-                latest = TeleopTarget.from_json(payload.decode("utf-8"))
-        if latest is not None:
-            self.latest_target = latest
-        return latest
-
-    def take_events(self) -> list[str]:
-        return []
-
-    def close(self) -> None:
-        try:
-            self.poller.unregister(self.socket)
-        except (KeyError, zmq.ZMQError):
-            pass
-        self.socket.close(0)

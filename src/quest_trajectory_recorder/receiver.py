@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lightweight receiver for the Open-Teach controller-tracking Quest APK.
+"""Lightweight receiver for the controller-tracking Quest APK.
 
 The Quest app uses ZMQ PUSH sockets. This script binds matching ZMQ PULL
 sockets and records the raw frames plus parsed right-hand keypoints.
@@ -182,7 +182,7 @@ def summarize(seq: int, channel: str, decoded: dict[str, Any]) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Receive Open-Teach Quest ZMQ frames.")
+    parser = argparse.ArgumentParser(description="Receive Quest controller ZMQ frames.")
     parser.add_argument("--host", default="0.0.0.0", help="ZMQ bind host. Use 0.0.0.0 for LAN.")
     parser.add_argument("--keypoint-port", type=int, default=DEFAULT_PORTS["keypoints"])
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])

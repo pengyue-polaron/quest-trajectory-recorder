@@ -10,7 +10,6 @@ The observed controller-tracking Quest APK uses NetMQ PUSH sockets. The receiver
 | gripper trigger | 8127 | APK-dependent text event for Franka gripper toggle |
 | resolution | 8095 | `High`, `Low`, or `None` |
 | pause/continue | 8100 | `High`, `Low`, or `None` |
-| original hand keypoints | 8087 | Open-Teach hand keypoint variant, not the controller pose variant |
 
 ## Controller pose frame
 
@@ -31,11 +30,23 @@ Parsed output columns:
 
 The APK frame does not include a device timestamp. The receiver records local arrival time (`recv_unix` / `recv_iso`). Arrival time can be bursty due to buffering, so it should not be used as a ground-truth motion timestamp.
 
-## Open-Teach compatibility
-
-Open-Teach's original hand pipeline receives raw hand keypoints on `8087`, then publishes transformed hand frames on `8089`. This project adds a controller-pose adapter that republishes the observed `8125` stream as Open-Teach-style PUB/SUB topics.
-
-
 ## Simulator target stream
 
-`quest-tracker-hub` is the preferred boundary between Quest tracking and simulator backends. It consumes the raw APK ports above, applies the selected calibration profile, and publishes a `TeleopTarget` JSON message on `tcp://127.0.0.1:8130` with topic `teleop_target`. Backends such as LIBERO should subscribe to this stream instead of binding the raw Quest ports themselves.
+`quest-tracker-hub` is the preferred boundary between Quest tracking and
+simulator backends. It consumes the raw APK ports above, applies the selected
+calibration profile, and publishes `embodied.teleop_target/v1` JSON on
+`tcp://127.0.0.1:8130`, topic `teleop_target`. In addition to calibrated/raw
+pose and gate/gripper state, the generic fields carry source/session/frame
+identity, tracking validity, and host timing. Quest-only raw pose, button,
+controller, and calibration provenance live under `source_metadata`. Consumers
+reject payloads that do not declare the canonical schema.
+
+The hub also publishes `embodied.teleop_source_status/v1` on topic
+`teleop_status`.
+Backends send `embodied.teleop_feedback/v1` plus separate Agent/wrist JPEG parts
+on ZMQ PUB endpoint `8131`. Foxglove commands use a DEALER/ROUTER connection on
+`8132`, and the backend returns
+`embodied.teleop_command_result/v1` only after rejecting or applying the request.
+Request IDs are idempotent. Camera bytes remain outside JSON so Foxglove
+does not add base64 work to the control loop. See
+`docs/unified_teleop.md` for field ownership and safety behavior.

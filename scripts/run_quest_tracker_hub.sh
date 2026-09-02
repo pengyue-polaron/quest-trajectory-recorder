@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PROFILE="${CALIBRATION_PROFILE:-libero_default}"
+PROFILE="${CALIBRATION_PROFILE:-quest_teleop_frame}"
 EXTRA_ARGS=()
 USER_SET_CALIBRATION=0
 while [[ $# -gt 0 ]]; do
