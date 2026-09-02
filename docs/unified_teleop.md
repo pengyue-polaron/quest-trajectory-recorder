@@ -126,7 +126,9 @@ window instead of creating another reconnecting tab. Use
 intentional.
 The organization
 layout is `Quest Unified Teleop` (`lay_0eaTLQSSPmExnWfB`); its versioned export
-is `foxglove/quest_teleop.foxglove-layout.json`.
+is `foxglove/quest_teleop.foxglove-layout.json`. All buttons live in the
+`quest-teleop-controls.controls` React extension panel; there are no scattered
+native Call Service panels in the maintained layout.
 
 Topics:
 
@@ -156,6 +158,14 @@ Detail panel. `Teleop/Controller` shows exactly the B-button streaming state,
 live controller pose, and Quest-online state. Its headline distinguishes a
 paused stream, tracking loss, stale pose, and stalled backend. Raw JSON topics
 remain available for engineering plots but are not part of the operator layout.
+
+The extension source is `foxglove/quest-teleop-controls`. Run `npm ci && npm
+run local-install` there for local development or `npm run package` to produce
+the `.foxe` archive. The `Publish Foxglove operator UI` GitHub Action validates
+and packages the extension, uploads it to the organization registry, and then
+updates and verifies the organization layout. It requires the repository
+secret `FOXGLOVE_API_KEY`. Bump the extension version before publishing changed
+extension code because Foxglove requires every uploaded version to be unique.
 
 Interactive ManiSkill collection disables the environment's registered
 700-step timeout. A completed or explicitly timed episode enters Hold and waits

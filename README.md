@@ -91,8 +91,10 @@ The launcher clears Oculus first-time/system dialogs that can otherwise block
 an ADB-started VR activity, then starts FrankaBot explicitly in the Quest VR
 category. The health monitor repeats the same recovery after a focus loss.
 Foxglove's native Diagnostics panel shows only the B-button streaming state,
-the live controller pose, and whether Quest is online. Its headline also makes
-tracking loss or a stalled backend immediately visible.
+the live controller pose, and whether Quest is online. A single compact React
+panel groups every safety, episode, and recording action and waits for the
+backend acknowledgement before enabling the next action. Its headline also
+makes tracking loss or a stalled backend immediately visible.
 
 ## Installation
 

@@ -1,0 +1,62 @@
+name: Publish Foxglove operator UI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-foxglove.yml"
+      - "foxglove/quest-teleop-controls/**"
+      - "foxglove/quest_teleop.foxglove-layout.json"
+      - "src/quest_trajectory_recorder/foxglove_publish.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-foxglove-operator-ui
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: foxglove/quest-teleop-controls
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: foxglove/quest-teleop-controls/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify extension
+        run: |
+          npm run typecheck
+          npm run lint
+          npm audit
+
+      - name: Package extension
+        run: npm run package
+
+      - name: Upload .foxe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quest-teleop-controls
+          path: foxglove/quest-teleop-controls/*.foxe
+          if-no-files-found: error
+
+      - name: Publish extension and organization layout
+        env:
+          FOXGLOVE_API_KEY: ${{ secrets.FOXGLOVE_API_KEY }}
+          PYTHONPATH: src
+        working-directory: .
+        run: |
+          test -n "$FOXGLOVE_API_KEY"
+          extension_path=$(find foxglove/quest-teleop-controls -maxdepth 1 -name '*.foxe' -print -quit)
+          python -m quest_trajectory_recorder.foxglove_publish --extension "$extension_path"

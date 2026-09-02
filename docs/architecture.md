@@ -39,6 +39,8 @@ Panels are not alternate production paths.
 | `synthetic_target.py` | Deterministic canonical source for tests. |
 | `device_doctor.py` | Read-only ADB/APK/port/calibration readiness. |
 | `foxglove_bridge.py` | Canonical ZMQ observer/command client mapped to Foxglove images, native diagnostics, poses, and services. |
+| `foxglove/quest-teleop-controls` | Compact React panel that calls the acknowledged Foxglove services. |
+| `foxglove_publish.py` | CI publisher for the versioned `.foxe` and organization layout. |
 | `live3d.py`, `live3d_web.py` | Quest-only calibration UI and profile writer. |
 | `libero_teleop.py` | Optional LIBERO backend consuming canonical ZMQ only. |
 

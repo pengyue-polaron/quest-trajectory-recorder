@@ -83,85 +83,8 @@
       "splitFraction": 0.32,
       "foxglovePanelTitle": "Quest controller"
     },
-    "CallService!quest-hold": {
-      "serviceName": "/teleop/hold",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "HOLD",
-      "buttonTooltip": "Zero Cartesian motion and release the clutch home",
-      "buttonColor": "#d32f2f",
-      "editingMode": false,
-      "foxglovePanelTitle": "Safety hold"
-    },
-    "CallService!quest-resume": {
-      "serviceName": "/teleop/resume",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "RESUME / RE-CLUTCH",
-      "buttonTooltip": "Resume from the current controller and EEF poses",
-      "buttonColor": "#2e7d32",
-      "editingMode": false,
-      "foxglovePanelTitle": "Resume"
-    },
-    "CallService!quest-previous": {
-      "serviceName": "/teleop/episode/previous",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "PREVIOUS",
-      "buttonTooltip": "Load the previous episode seed where supported",
-      "buttonColor": "#455a64",
-      "editingMode": false,
-      "foxglovePanelTitle": "Previous episode"
-    },
-    "CallService!quest-reset": {
-      "serviceName": "/teleop/episode/reset",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "RESET",
-      "buttonTooltip": "Reset the current episode seed",
-      "buttonColor": "#ef6c00",
-      "editingMode": false,
-      "foxglovePanelTitle": "Reset episode"
-    },
-    "CallService!quest-next": {
-      "serviceName": "/teleop/episode/next",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "NEXT",
-      "buttonTooltip": "Load the next episode seed",
-      "buttonColor": "#1565c0",
-      "editingMode": false,
-      "foxglovePanelTitle": "Next episode"
-    },
-    "CallService!quest-record": {
-      "serviceName": "/teleop/recording/start",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "START RECORDING",
-      "buttonTooltip": "Start a synchronized action/camera episode",
-      "buttonColor": "#6a1b9a",
-      "editingMode": false,
-      "foxglovePanelTitle": "Recording"
-    },
-    "CallService!quest-stop-record": {
-      "serviceName": "/teleop/recording/stop",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "STOP RECORDING",
-      "buttonTooltip": "Finalize the current synchronized episode",
-      "buttonColor": "#6a1b9a",
-      "editingMode": false,
-      "foxglovePanelTitle": "Finalize recording"
-    },
-    "CallService!quest-discard-record": {
-      "serviceName": "/teleop/recording/discard",
-      "requestPayload": "{}",
-      "layout": "vertical",
-      "buttonText": "DISCARD PARTIAL",
-      "buttonTooltip": "Retain the current episode as explicitly incomplete",
-      "buttonColor": "#c62828",
-      "editingMode": false,
-      "foxglovePanelTitle": "Discard recording"
+    "quest-teleop-controls.controls!quest-controls": {
+      "foxglovePanelTitle": "Controls"
     }
   },
   "globalVariables": {},
@@ -184,43 +107,8 @@
         "second": "DiagnosticStatusPanel!quest-controller",
         "splitPercentage": 55
       },
-      "second": {
-        "direction": "row",
-        "first": {
-          "direction": "column",
-          "first": "CallService!quest-hold",
-          "second": "CallService!quest-resume",
-          "splitPercentage": 50
-        },
-        "second": {
-          "direction": "row",
-          "first": "CallService!quest-previous",
-          "second": {
-            "direction": "column",
-            "first": "CallService!quest-reset",
-            "second": {
-              "direction": "row",
-              "first": "CallService!quest-next",
-              "second": {
-                "direction": "column",
-                "first": "CallService!quest-record",
-                "second": {
-                  "direction": "row",
-                  "first": "CallService!quest-stop-record",
-                  "second": "CallService!quest-discard-record",
-                  "splitPercentage": 50
-                },
-                "splitPercentage": 50
-              },
-              "splitPercentage": 50
-            },
-            "splitPercentage": 50
-          },
-          "splitPercentage": 34
-        },
-        "splitPercentage": 28
-      },
-      "splitPercentage": 76
+      "second": "quest-teleop-controls.controls!quest-controls",
+      "splitPercentage": 78
     },
     "splitPercentage": 58
   }
