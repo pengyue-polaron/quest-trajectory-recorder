@@ -73,7 +73,9 @@ It waits up to 120 seconds for an authorized Quest by default, so the practical
 sequence is simply: power/wake Quest, connect USB, run the command, wear the
 headset, pick up the right controller, then press `B` to clutch.
 `--adb-wait-seconds N` changes the startup wait. During a session, the hub restores reverse ports
-and FrankaBot focus after an ADB reconnect without restarting the simulator.
+after an ADB reconnect without restarting the simulator. A single failed ADB
+probe is debounced, and FrankaBot is refocused only when its activity is no
+longer active, avoiding needless VR restarts during a transient USB wobble.
 
 Do wear the headset while controlling. Meta can leave ADB and the controller
 radio connected while marking the controller `CONNECTED_INACTIVE`; in that
@@ -158,6 +160,12 @@ Detail panel. `Teleop/Controller` shows exactly the B-button streaming state,
 live controller pose, and Quest-online state. Its headline distinguishes a
 paused stream, tracking loss, stale pose, and stalled backend. Raw JSON topics
 remain available for engineering plots but are not part of the operator layout.
+The recovered APK intentionally stops pose packets while B is released; that
+state is reported as `Paused`, not as a controller disconnect.
+
+Agent view and wrist camera sit side by side in near-native-aspect panels. The
+force and torque plots sit directly below them, while Diagnostics and the
+compact React controls occupy one dedicated right-hand operator sidebar.
 
 Two compact Plot panels render `/teleop/telemetry.force_*` and
 `/teleop/telemetry.torque_*`. ForceVLA publishes zeroed world-frame components

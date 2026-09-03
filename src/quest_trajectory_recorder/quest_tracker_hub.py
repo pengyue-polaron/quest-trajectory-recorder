@@ -43,6 +43,7 @@ _DISCONNECTED_DEVICE = {
     "serial": None,
     "app_resumed": False,
 }
+_ADB_DISCONNECT_CONFIRMATIONS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,8 @@ class _AdbHealthMonitor:
         self._focus_fn = focus_fn
         self._device_info_fn = device_info_fn
         self._previous_connected = bool(initial_device.get("adb_connected"))
+        self._last_device = dict(initial_device)
+        self._consecutive_disconnects = 0
         self._last_app_refocus_at = 0.0
         self._updates: queue.SimpleQueue[_AdbHealthUpdate] = queue.SimpleQueue()
         self._stop = threading.Event()
@@ -110,26 +113,29 @@ class _AdbHealthMonitor:
     def _check_once(self, now: float) -> _AdbHealthUpdate:
         events: list[str] = []
         connected = self._connected_fn()
+        device = dict(_DISCONNECTED_DEVICE)
         if connected:
             try:
                 missing_ports = sorted(set(self.required_ports) - self._reverse_ports_fn())
                 if missing_ports:
                     self._setup_reverse_fn(missing_ports)
                     events.append(f"ADB reverse mappings restored: {missing_ports}")
-                if not self._previous_connected and self.manage_app:
-                    self._focus_fn()
-                    self._last_app_refocus_at = now
-                    events.append("FrankaBot refocused after ADB reconnect.")
+                device = dict(self._device_info_fn())
+                if device.get("adb_connected") is False:
+                    connected = False
             except (OSError, RuntimeError, subprocess.SubprocessError):
                 connected = False
+        if connected:
+            self._consecutive_disconnects = 0
+        else:
+            self._consecutive_disconnects += 1
+            if (
+                self._previous_connected
+                and self._consecutive_disconnects < _ADB_DISCONNECT_CONFIRMATIONS
+            ):
+                return _AdbHealthUpdate(device=dict(self._last_device), events=())
         if connected != self._previous_connected:
             events.append(f"ADB device {'connected' if connected else 'disconnected'}.")
-        self._previous_connected = connected
-
-        try:
-            device = self._device_info_fn()
-        except (OSError, RuntimeError, subprocess.SubprocessError):
-            device = dict(_DISCONNECTED_DEVICE)
         if (
             connected
             and self.manage_app
@@ -140,9 +146,15 @@ class _AdbHealthMonitor:
                 self._focus_fn()
                 self._last_app_refocus_at = now
                 device = self._device_info_fn()
-                events.append("FrankaBot lost focus and was restored.")
+                events.append(
+                    "FrankaBot refocused after ADB reconnect."
+                    if not self._previous_connected
+                    else "FrankaBot lost focus and was restored."
+                )
             except (OSError, RuntimeError, subprocess.SubprocessError):
                 pass
+        self._previous_connected = connected
+        self._last_device = dict(device)
         return _AdbHealthUpdate(device=dict(device), events=tuple(events))
 
     def _run(self) -> None:
@@ -202,6 +214,30 @@ def parse_args() -> argparse.Namespace:
         help="When using ADB reverse, restore port mappings after a USB reconnect; 0 disables.",
     )
     return parser.parse_args()
+
+
+def _source_state(
+    *,
+    adb_online: bool | None,
+    has_received_pose: bool,
+    raw_online: bool,
+    tracking_valid: bool,
+    gate_open: bool,
+    pause_state: str | None,
+) -> str:
+    """Classify operator state without mistaking an intentional pause for dropout."""
+
+    if adb_online is False and not raw_online:
+        return "adb_disconnected"
+    if pause_state is not None and not gate_open:
+        return "ready"
+    if not has_received_pose:
+        return "waiting_for_controller"
+    if not raw_online:
+        return "controller_offline"
+    if not tracking_valid:
+        return "tracking_invalid"
+    return "streaming" if gate_open else "ready"
 
 
 def main() -> int:
@@ -376,18 +412,14 @@ def main() -> int:
                     and valid_age_sec is not None
                     and valid_age_sec <= 0.5
                 )
-                if device.get("adb_connected") is False:
-                    state = "adb_disconnected"
-                elif source.latest_raw_at is None:
-                    state = "waiting_for_controller"
-                elif not raw_online:
-                    state = "controller_offline"
-                elif not tracking_valid:
-                    state = "tracking_invalid"
-                elif source.gate_open:
-                    state = "streaming"
-                else:
-                    state = "ready"
+                state = _source_state(
+                    adb_online=device.get("adb_connected"),
+                    has_received_pose=source.latest_raw_at is not None,
+                    raw_online=raw_online,
+                    tracking_valid=tracking_valid,
+                    gate_open=source.gate_open,
+                    pause_state=source.pause_state,
+                )
                 status = TeleopSourceStatus(
                     source="quest",
                     session_id=session_id,

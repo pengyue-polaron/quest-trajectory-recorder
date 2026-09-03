@@ -258,8 +258,9 @@ adb shell am start -n com.Xigbee.FrankaBot/com.unity3d.player.UnityPlayerActivit
 
 `scripts/start_frankabot.sh` does this automatically after launch. Use
 `--keep-panels` only if you intentionally want to leave Oculus panels open.
-The tracker hub repeats this recovery after later ADB disconnects or focus
-loss; restarting the whole session is normally unnecessary.
+The tracker hub restores reverse ports after confirmed ADB disconnects and
+refocuses FrankaBot only when its activity actually lost focus; restarting the
+whole session is normally unnecessary.
 
 
 ## Output Files

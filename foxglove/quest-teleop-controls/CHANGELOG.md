@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.5
+
+- Arrange the camera panels side by side at a near-native aspect ratio.
+- Move force and torque plots below the cameras and keep diagnostics and
+  controls in a dedicated operator sidebar.
+- Simplify the controls into compact Robot, Episode, and Recording rows.
+
 ## 1.0.4
 
 - Publish the compact ForceVLA force and torque plot layout alongside the

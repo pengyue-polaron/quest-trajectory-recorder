@@ -227,22 +227,24 @@ def diagnostic_array(
     gate_open = bool(
         target.gate_open if target_fresh and target is not None else source.get("gate_open")
     )
+    quest_online = bool(adb_online or stream_online)
+    app_active = bool(app_resumed or stream_online)
 
     if source_stale:
         level = DIAGNOSTIC_STALE
         message = "Quest offline"
-    elif not adb_online:
+    elif not quest_online:
         level = DIAGNOSTIC_ERROR
         message = "Quest offline"
-    elif not app_resumed:
+    elif not app_active:
         level = DIAGNOSTIC_WARN
         message = "Quest app not active"
+    elif gate_known and not gate_open:
+        level = DIAGNOSTIC_WARN
+        message = "Paused — press B to stream"
     elif not stream_online:
         level = DIAGNOSTIC_WARN
         message = "Controller offline"
-    elif not gate_open:
-        level = DIAGNOSTIC_WARN
-        message = "Paused — press B to stream"
     elif not target_fresh:
         level = DIAGNOSTIC_STALE
         message = "Controller pose stale"
@@ -264,19 +266,19 @@ def diagnostic_array(
 
     if synthetic_source:
         quest_label = "SYNTHETIC"
-    elif source_stale or not adb_online:
+    elif source_stale or not quest_online:
         quest_label = "OFFLINE"
     else:
         quest_label = "ONLINE"
 
     if not gate_known:
         streaming_label = "UNKNOWN"
-    elif not stream_online:
-        streaming_label = "OFFLINE · B pressed" if gate_open else "OFFLINE · B released"
-    elif gate_open:
+    elif not gate_open:
+        streaming_label = "PAUSED · B released"
+    elif stream_online:
         streaming_label = "ON · B pressed"
     else:
-        streaming_label = "PAUSED · B released"
+        streaming_label = "OFFLINE · B pressed"
 
     if target_fresh and target is not None and target.tracking_valid:
         x, y, z = target.position

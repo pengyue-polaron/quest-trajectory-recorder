@@ -83,26 +83,26 @@
     "direction": "row",
     "first": {
       "direction": "column",
-      "first": "Image!quest-agent",
-      "second": "Image!quest-wrist",
+      "first": {
+        "direction": "row",
+        "first": "Image!quest-agent",
+        "second": "Image!quest-wrist",
+        "splitPercentage": 50
+      },
+      "second": {
+        "direction": "row",
+        "first": "Plot!wrist-force",
+        "second": "Plot!wrist-torque",
+        "splitPercentage": 50
+      },
       "splitPercentage": 50
     },
     "second": {
       "direction": "column",
       "first": "DiagnosticStatusPanel!quest-controller",
-      "second": {
-        "direction": "column",
-        "first": {
-          "direction": "column",
-          "first": "Plot!wrist-force",
-          "second": "Plot!wrist-torque",
-          "splitPercentage": 50
-        },
-        "second": "quest-teleop-controls.controls!quest-controls",
-        "splitPercentage": 72
-      },
-      "splitPercentage": 18
+      "second": "quest-teleop-controls.controls!quest-controls",
+      "splitPercentage": 36
     },
-    "splitPercentage": 60
+    "splitPercentage": 76
   }
 }

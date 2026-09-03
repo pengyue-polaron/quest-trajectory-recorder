@@ -25,7 +25,7 @@ type ControlGroup = {
 
 const CONTROL_GROUPS: ControlGroup[] = [
   {
-    label: "Safety",
+    label: "Robot",
     controls: [
       {
         id: "hold",
@@ -48,7 +48,7 @@ const CONTROL_GROUPS: ControlGroup[] = [
     controls: [
       {
         id: "previous",
-        label: "Previous",
+        label: "← Previous",
         service: "/teleop/episode/previous",
         title: "Load the previous episode seed",
       },
@@ -60,7 +60,7 @@ const CONTROL_GROUPS: ControlGroup[] = [
       },
       {
         id: "next",
-        label: "Next",
+        label: "Next →",
         service: "/teleop/episode/next",
         title: "Load the next episode seed",
       },
@@ -71,14 +71,14 @@ const CONTROL_GROUPS: ControlGroup[] = [
     controls: [
       {
         id: "record",
-        label: "Start",
+        label: "● Start",
         service: "/teleop/recording/start",
         title: "Start a synchronized action and camera recording",
         tone: "primary",
       },
       {
         id: "save",
-        label: "Stop & save",
+        label: "■ Save",
         service: "/teleop/recording/stop",
         title: "Finalize and save the current recording",
       },

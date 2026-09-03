@@ -102,6 +102,17 @@ def test_layout_uses_compact_force_and_torque_plots() -> None:
         "/teleop/telemetry.torque_z_Nm",
         "/teleop/telemetry.torque_norm_Nm",
     }
+    root = layout["layout"]
+    assert root["splitPercentage"] == 76
+    assert root["first"]["first"] == {
+        "direction": "row",
+        "first": "Image!quest-agent",
+        "second": "Image!quest-wrist",
+        "splitPercentage": 50,
+    }
+    assert root["first"]["second"]["first"] == "Plot!wrist-force"
+    assert root["first"]["second"]["second"] == "Plot!wrist-torque"
+    assert root["second"]["second"] == "quest-teleop-controls.controls!quest-controls"
 
 
 def test_pose_message_uses_foxglove_vector_position() -> None:
@@ -319,6 +330,18 @@ def test_diagnostics_distinguish_paused_from_a_stale_controller_pose() -> None:
     )["status"][0]
     assert paused["message"] == "Paused — press B to stream"
     assert paused["values"][0]["value"] == "PAUSED · B released"
+
+    paused_without_pose_stream = diagnostic_array(
+        timestamp_ns=123,
+        source_status={**source_status, "stream_online": False, "tracking_valid": False},
+        source_age_sec=0.1,
+        target=None,
+        target_age_sec=None,
+        feedback=None,
+        feedback_age_sec=None,
+    )["status"][0]
+    assert paused_without_pose_stream["message"] == "Paused — press B to stream"
+    assert paused_without_pose_stream["values"][0]["value"] == "PAUSED · B released"
 
     stale_source = diagnostic_array(
         timestamp_ns=123,
