@@ -221,6 +221,8 @@ of leaving ambiguous partial data; interruption is retained but explicitly
 marked in the manifest. Source/session/controller/calibration provenance is
 summarized per take; a mixed session, sequence regression, or missing/mixed
 Quest calibration digest automatically makes the take ineligible for training.
-The same fail-closed rule applies when a recorded camera source frame does not
-match its action frame; the exact mismatch count and maximum camera age remain
-in the manifest for diagnosis.
+Camera alignment semantics are backend-declared and explicit. ForceVLA records
+the latest completed pre-action snapshot without making control wait for
+rendering; source-frame reuse is expected, its age is recorded, and samples
+older than 250 ms make the take ineligible. The exact mismatch count, stale
+count, and maximum age remain in the manifest for diagnosis.
