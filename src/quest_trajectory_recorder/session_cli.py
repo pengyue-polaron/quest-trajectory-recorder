@@ -12,7 +12,7 @@ import tempfile
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 from urllib.error import URLError
@@ -32,7 +32,7 @@ DEFAULT_WAIT_SECONDS = 180.0
 
 
 def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def runtime_dir() -> Path:
