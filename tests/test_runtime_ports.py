@@ -14,6 +14,17 @@ def test_calibration_web_port_is_separate_from_foxglove() -> None:
     assert args.web_port != 8765
 
 
+def test_calibration_page_starts_before_quest_attachment() -> None:
+    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_calibration.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "prepare_quest_when_available &" in launcher
+    assert "scripts/run_live3d.sh" in launcher
+    assert "--adb-reverse" not in launcher
+    assert "quest_trajectory_recorder.device_cli prepare" in launcher
+
+
 def test_session_launcher_uses_protocol_probe_and_child_liveness() -> None:
     launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
         encoding="utf-8"

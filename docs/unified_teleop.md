@@ -47,7 +47,11 @@ just stop
 ```
 
 The calibration page uses `http://127.0.0.1:8766`; it never shares
-Foxglove's collection port.
+Foxglove's collection port. It starts before Quest is connected, so the profile
+editor is always available. A background attachment step waits for authorized
+ADB, restores the reverse ports, and softly focuses FrankaBot without restarting
+an already-running app. It remains present to repair the mapping after a real
+USB disconnect and reconnect.
 
 Then start one complete session:
 

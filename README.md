@@ -39,6 +39,12 @@ probe, `just logs` shows the latest log, and `just stop` is idempotent. Stopping
 an active recording never silently labels it training-ready; save it in
 Foxglove first when it should become a demonstration.
 
+Calibration is page-first: `just calibrate <profile>` opens the local editor
+even when Quest is still offline, then attaches Quest and repairs its reverse
+ports as soon as USB debugging becomes available. A later USB reconnect repairs
+the link again without restarting an active app. `just status` remains
+`DEGRADED` until the device and FrankaBot are ready, while the page stays usable.
+
 `just adb-prepare` repairs ADB reverse mappings and brings FrankaBot forward
 without restarting it. `just adb-focus` is the next recovery step if a Meta
 panel stole focus. `just adb-restart` is deliberately explicit and should be
