@@ -22,3 +22,12 @@ def test_session_launcher_uses_protocol_probe_and_child_liveness() -> None:
     assert "quest_trajectory_recorder.foxglove_probe" in launcher
     assert 'kill -0 "$FOXGLOVE_PID"' in launcher
     assert "socket.create_connection" not in launcher
+
+
+def test_session_launcher_appends_common_args_without_expanding_an_empty_array() -> None:
+    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "BACKEND_ARGS+=(" in launcher
+    assert '  "${BACKEND_ARGS[@]}"\n)' not in launcher

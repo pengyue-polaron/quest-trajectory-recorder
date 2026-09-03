@@ -258,11 +258,10 @@ fi
 echo "Quest teleop session: source=$SOURCE_LABEL backend=$BACKEND"
 echo "Foxglove: $FOXGLOVE_URL (layout: Quest Unified Teleop)"
 
-BACKEND_ARGS=(
+BACKEND_ARGS+=(
   --target-endpoint "$TARGET_ENDPOINT"
   --feedback-endpoint "$FEEDBACK_ENDPOINT"
   --command-endpoint "$COMMAND_ENDPOINT"
-  "${BACKEND_ARGS[@]}"
 )
 "$BACKEND_LAUNCHER" "${BACKEND_ARGS[@]}" &
 BACKEND_PID="$!"
