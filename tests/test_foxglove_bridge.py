@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 from embodied_ops.teleop import TeleopCommandResult, TeleopFeedback, TeleopTarget
 from foxglove.messages import PoseInFrame
@@ -63,11 +64,44 @@ def test_feedback_is_flattened_for_foxglove_plots() -> None:
         eef_position=[0.1, 0.2, 0.3],
         gripper=-1.0,
         action=[0.4, 0.5],
+        diagnostics={
+            "force_x_N": 1.0,
+            "force_y_N": 2.0,
+            "force_z_N": 3.0,
+            "force_norm_N": 3.741,
+            "torque_x_Nm": 0.1,
+            "torque_y_Nm": 0.2,
+            "torque_z_Nm": 0.3,
+            "torque_norm_Nm": 0.374,
+            "wrench_bias_ready": True,
+        },
     )
     telemetry = feedback_telemetry(feedback)
     assert telemetry["eef_z_m"] == 0.3
     assert telemetry["action_0"] == 0.4
     assert telemetry["action_2"] is None
+    assert telemetry["force_z_N"] == 3.0
+    assert telemetry["torque_y_Nm"] == 0.2
+    assert telemetry["wrench_bias_ready"] is True
+
+
+def test_layout_uses_compact_force_and_torque_plots() -> None:
+    path = Path(__file__).resolve().parents[1] / "foxglove" / "quest_teleop.foxglove-layout.json"
+    layout = json.loads(path.read_text(encoding="utf-8"))
+    configs = layout["configById"]
+    assert "3D!quest-eef" not in configs
+    assert {item["value"] for item in configs["Plot!wrist-force"]["paths"]} == {
+        "/teleop/telemetry.force_x_N",
+        "/teleop/telemetry.force_y_N",
+        "/teleop/telemetry.force_z_N",
+        "/teleop/telemetry.force_norm_N",
+    }
+    assert {item["value"] for item in configs["Plot!wrist-torque"]["paths"]} == {
+        "/teleop/telemetry.torque_x_Nm",
+        "/teleop/telemetry.torque_y_Nm",
+        "/teleop/telemetry.torque_z_Nm",
+        "/teleop/telemetry.torque_norm_Nm",
+    }
 
 
 def test_pose_message_uses_foxglove_vector_position() -> None:

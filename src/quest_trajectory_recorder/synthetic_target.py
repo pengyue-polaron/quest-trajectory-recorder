@@ -29,6 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--amplitude-m", type=float, default=0.04)
     parser.add_argument("--period-sec", type=float, default=8.0)
     parser.add_argument("--gate-open", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--gripper", choices=("open", "closed"), default="open")
     return parser.parse_args(argv)
 
 
@@ -91,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                 timestamp=now_ns / 1e9,
                 position=position,
                 rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-                gripper=-1.0,
+                gripper=1.0 if args.gripper == "closed" else -1.0,
                 gate_open=args.gate_open,
                 source="synthetic",
                 session_id=session_id,

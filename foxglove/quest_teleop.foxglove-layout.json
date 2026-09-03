@@ -32,56 +32,44 @@
       },
       "foxglovePanelTitle": "Wrist camera"
     },
-    "3D!quest-eef": {
-      "cameraState": {
-        "distance": 1.2,
-        "perspective": true,
-        "phi": 0.6,
-        "target": [0, 0, 0],
-        "targetOffset": [0, 0, 0],
-        "targetOrientation": [0, 0, 0, 1],
-        "thetaOffset": 0.7,
-        "fovy": 45,
-        "near": 0.01,
-        "far": 100
-      },
-    "followMode": "follow-none",
-      "fixedFrame": "teleop_world",
-    "scene": {
-      "backgroundColor": "#101615",
-      "labelScaleFactor": 0.2,
-      "transforms": {"showLabel": false}
-    },
-      "transforms": {},
-      "topics": {
-        "/teleop/eef_pose": {"visible": true},
-        "/teleop/desired_eef_pose": {"visible": true}
-      },
-      "layers": {
-        "quest-grid": {
-          "visible": true,
-          "frameLocked": true,
-          "label": "Workspace grid",
-          "instanceId": "quest-grid",
-          "layerId": "foxglove.Grid",
-          "size": 1.2,
-          "divisions": 12,
-          "lineWidth": 1,
-          "color": "#52645f",
-          "position": [0, 0, 0],
-          "rotation": [0, 0, 0],
-          "order": 1,
-          "frameId": "teleop_world"
-        }
-      },
-      "foxglovePanelTitle": "EEF / desired EEF"
-    },
     "DiagnosticStatusPanel!quest-controller": {
       "topicToRender": "/teleop/diagnostics",
       "selectedHardwareId": "quest-teleop",
       "selectedName": "Teleop/Controller",
       "splitFraction": 0.32,
       "foxglovePanelTitle": "Quest controller"
+    },
+    "Plot!wrist-force": {
+      "paths": [
+        {"value": "/teleop/telemetry.force_x_N", "enabled": true, "timestampMethod": "receiveTime", "color": "#ef5350", "label": "Fx", "showLine": true},
+        {"value": "/teleop/telemetry.force_y_N", "enabled": true, "timestampMethod": "receiveTime", "color": "#66bb6a", "label": "Fy", "showLine": true},
+        {"value": "/teleop/telemetry.force_z_N", "enabled": true, "timestampMethod": "receiveTime", "color": "#42a5f5", "label": "Fz", "showLine": true},
+        {"value": "/teleop/telemetry.force_norm_N", "enabled": true, "timestampMethod": "receiveTime", "color": "#eeeeee", "label": "|F|", "showLine": true}
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "foxglovePanelTitle": "Wrist force (N)"
+    },
+    "Plot!wrist-torque": {
+      "paths": [
+        {"value": "/teleop/telemetry.torque_x_Nm", "enabled": true, "timestampMethod": "receiveTime", "color": "#ef5350", "label": "Tx", "showLine": true},
+        {"value": "/teleop/telemetry.torque_y_Nm", "enabled": true, "timestampMethod": "receiveTime", "color": "#66bb6a", "label": "Ty", "showLine": true},
+        {"value": "/teleop/telemetry.torque_z_Nm", "enabled": true, "timestampMethod": "receiveTime", "color": "#42a5f5", "label": "Tz", "showLine": true},
+        {"value": "/teleop/telemetry.torque_norm_Nm", "enabled": true, "timestampMethod": "receiveTime", "color": "#eeeeee", "label": "|T|", "showLine": true}
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "foxglovePanelTitle": "Wrist torque (N·m)"
     },
     "quest-teleop-controls.controls!quest-controls": {
       "foxglovePanelTitle": "Controls"
@@ -101,15 +89,20 @@
     },
     "second": {
       "direction": "column",
-      "first": {
-        "direction": "row",
-        "first": "3D!quest-eef",
-        "second": "DiagnosticStatusPanel!quest-controller",
-        "splitPercentage": 55
+      "first": "DiagnosticStatusPanel!quest-controller",
+      "second": {
+        "direction": "column",
+        "first": {
+          "direction": "column",
+          "first": "Plot!wrist-force",
+          "second": "Plot!wrist-torque",
+          "splitPercentage": 50
+        },
+        "second": "quest-teleop-controls.controls!quest-controls",
+        "splitPercentage": 72
       },
-      "second": "quest-teleop-controls.controls!quest-controls",
-      "splitPercentage": 78
+      "splitPercentage": 18
     },
-    "splitPercentage": 58
+    "splitPercentage": 60
   }
 }

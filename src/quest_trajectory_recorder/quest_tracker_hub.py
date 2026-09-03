@@ -180,6 +180,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allow-initial-high", action="store_true")
     parser.add_argument("--gripper-mode", choices=("toggle", "hold"), default="toggle")
     parser.add_argument(
+        "--initial-gripper",
+        choices=("open", "closed"),
+        default="open",
+        help="Initial canonical gripper state before the first controller toggle.",
+    )
+    parser.add_argument(
         "--tracking-loss-grace-ms",
         type=float,
         default=120.0,
@@ -257,6 +263,7 @@ def main() -> int:
         trajectory_gate_pause=args.trajectory_gate_pause,
         allow_initial_high=args.allow_initial_high,
         gripper_mode=args.gripper_mode,
+        initial_gripper=1.0 if args.initial_gripper == "closed" else -1.0,
         session_id=session_id,
         calibration_id=calibration_id,
         calibration_sha256=calibration_sha256,

@@ -86,6 +86,15 @@ TELEMETRY_SCHEMA = {
         "action_4": {"type": ["number", "null"]},
         "action_5": {"type": ["number", "null"]},
         "action_6": {"type": ["number", "null"]},
+        "force_x_N": {"type": ["number", "null"]},
+        "force_y_N": {"type": ["number", "null"]},
+        "force_z_N": {"type": ["number", "null"]},
+        "force_norm_N": {"type": ["number", "null"]},
+        "torque_x_Nm": {"type": ["number", "null"]},
+        "torque_y_Nm": {"type": ["number", "null"]},
+        "torque_z_Nm": {"type": ["number", "null"]},
+        "torque_norm_Nm": {"type": ["number", "null"]},
+        "wrench_bias_ready": {"type": ["boolean", "null"]},
         "diagnostics": {"type": "object"},
     },
     "additionalProperties": True,
@@ -388,6 +397,17 @@ def feedback_telemetry(feedback: TeleopFeedback) -> dict[str, Any]:
     action.extend([None] * (7 - len(action)))
     position = [float(item) for item in feedback.eef_position[:3]]
     position.extend([0.0] * (3 - len(position)))
+    wrench_fields = (
+        "force_x_N",
+        "force_y_N",
+        "force_z_N",
+        "force_norm_N",
+        "torque_x_Nm",
+        "torque_y_Nm",
+        "torque_z_Nm",
+        "torque_norm_Nm",
+        "wrench_bias_ready",
+    )
     return {
         "backend": feedback.backend,
         "episode_id": feedback.episode_id,
@@ -402,6 +422,7 @@ def feedback_telemetry(feedback: TeleopFeedback) -> dict[str, Any]:
         "eef_z_m": position[2],
         "gripper": feedback.gripper,
         **{f"action_{index}": action[index] for index in range(7)},
+        **{name: feedback.diagnostics.get(name) for name in wrench_fields},
         "diagnostics": feedback.diagnostics,
     }
 

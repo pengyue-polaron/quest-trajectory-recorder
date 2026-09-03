@@ -159,6 +159,12 @@ live controller pose, and Quest-online state. Its headline distinguishes a
 paused stream, tracking loss, stale pose, and stalled backend. Raw JSON topics
 remain available for engineering plots but are not part of the operator layout.
 
+Two compact Plot panels render `/teleop/telemetry.force_*` and
+`/teleop/telemetry.torque_*`. ForceVLA publishes zeroed world-frame components
+and norms; other backends leave these optional fields empty. The first five
+ForceVLA control steps establish display bias, without modifying recorded raw
+500 Hz wrench telemetry.
+
 The extension source is `foxglove/quest-teleop-controls`. Run `npm ci && npm
 run local-install` there for local development or `npm run package` to produce
 the `.foxe` archive. The `Publish Foxglove operator UI` GitHub Action validates
@@ -173,10 +179,11 @@ for Previous, Reset, or Next; it never advances to another scene on its own.
 Use `--episode-max-steps N` only when a deliberate timeout is useful.
 
 Default tracking protection is fail-closed: 250 ms target timeout, six-frame
-recovery, rejection of a controller step over 6 cm, 1 mm positional deadband,
-50 ms smoothing, and a 0.5 m/s guarded target slew limit. Both backends also
-apply their own workspace and native-action limits. These values are CLI
-options when a task needs deliberate tuning.
+recovery, rejection of a controller step over 6 cm, and a 1 mm positional
+deadband. ForceVLA uses a responsive 20 ms filter, a 0.8 m/s guarded target
+slew limit, and the full OSC action range; ManiSkill retains its backend
+defaults. Both backends also apply their own workspace and native-action
+limits. These values are CLI options when a task needs deliberate tuning.
 
 The same layout is shared by both maintained simulator backends:
 

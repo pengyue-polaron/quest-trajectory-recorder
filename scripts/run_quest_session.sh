@@ -36,7 +36,8 @@ Options:
   --episode-max-steps N      Optional backend timeout; zero means manual reset only.
   --record                   Start recording immediately.
   --recording-root PATH      Backend recording directory.
-  --orientation              Enable controller orientation mapping.
+  --orientation              Enable controller orientation mapping (default).
+  --no-orientation           Disable controller orientation mapping.
   --max-steps N              Stop after N backend steps (useful for tests).
   --no-open-foxglove         Start the gateway without opening Foxglove Desktop.
   --target-endpoint URL      Canonical target ZMQ endpoint.
@@ -48,7 +49,7 @@ Options:
 
 Examples:
   scripts/run_quest_session.sh --backend maniskill --profile desk --task cube_sort --record
-  scripts/run_quest_session.sh --backend mujoco --profile desk --record --orientation
+  scripts/run_quest_session.sh --backend mujoco --profile desk --record
   scripts/run_quest_session.sh --backend maniskill --synthetic --max-steps 80
 HELP
 }
@@ -80,7 +81,7 @@ while [[ $# -gt 0 ]]; do
       BACKEND_ARGS+=("$1" "$2")
       shift 2
       ;;
-    --record|--orientation)
+    --record|--orientation|--no-orientation)
       BACKEND_ARGS+=("$1")
       shift
       ;;
@@ -151,6 +152,11 @@ if [[ "$BACKEND" == "maniskill" ]]; then
 else
   BACKEND_LAUNCHER="$FORCEVLA_ROOT/scripts/run_mujoco_quest_teleop.sh"
 fi
+
+INITIAL_GRIPPER="open"
+if [[ "$BACKEND" == "mujoco" ]]; then
+  INITIAL_GRIPPER="closed"
+fi
 if [[ ! -x "$BACKEND_LAUNCHER" ]]; then
   echo "Backend launcher is missing or not executable: $BACKEND_LAUNCHER" >&2
   exit 1
@@ -192,7 +198,8 @@ FOXGLOVE_URL="ws://127.0.0.1:${FOXGLOVE_PORT}"
 if [[ "$SYNTHETIC" -eq 1 ]]; then
   "$ROOT/.venv/bin/python" -m quest_trajectory_recorder.synthetic_target \
     --bind "$TARGET_ENDPOINT" \
-    --pattern "$SYNTHETIC_PATTERN" --amplitude-m 0.015 &
+    --pattern "$SYNTHETIC_PATTERN" --amplitude-m 0.015 \
+    --gripper "$INITIAL_GRIPPER" &
   SOURCE_PID="$!"
   CHILD_PIDS+=("$SOURCE_PID")
   SOURCE_LABEL="synthetic:$SYNTHETIC_PATTERN"
@@ -207,7 +214,7 @@ else
     --adb-wait-seconds "$ADB_WAIT_SECONDS"
   "$ROOT/scripts/run_quest_doctor.sh" --calibration "$CALIBRATION_PATH"
   "$ROOT/scripts/run_quest_tracker_hub.sh" --profile "$PROFILE" \
-    --target-bind "$TARGET_ENDPOINT" &
+    --target-bind "$TARGET_ENDPOINT" --initial-gripper "$INITIAL_GRIPPER" &
   SOURCE_PID="$!"
   CHILD_PIDS+=("$SOURCE_PID")
   SOURCE_LABEL="quest:$PROFILE"

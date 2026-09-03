@@ -96,6 +96,11 @@ panel groups every safety, episode, and recording action and waits for the
 backend acknowledgement before enabling the next action. Its headline also
 makes tracking loss or a stalled backend immediately visible.
 
+For the ForceVLA MuJoCo backend, the source starts the canonical gripper state
+closed and the backend starts below the socket in its held-connector pose.
+Relative controller orientation is enabled by default. Foxglove adds compact
+world-frame wrist force and torque plots next to the same status and controls.
+
 ## Installation
 
 ```bash

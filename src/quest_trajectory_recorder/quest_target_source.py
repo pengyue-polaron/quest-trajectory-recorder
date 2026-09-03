@@ -37,6 +37,7 @@ class DirectQuestTargetSource:
         trajectory_gate_pause: str,
         allow_initial_high: bool,
         gripper_mode: str,
+        initial_gripper: float = -1.0,
         session_id: str = "unspecified",
         calibration_id: str | None = None,
         calibration_sha256: str | None = None,
@@ -44,6 +45,8 @@ class DirectQuestTargetSource:
     ) -> None:
         if not math.isfinite(tracking_loss_grace_ms) or tracking_loss_grace_ms < 0:
             raise ValueError("tracking_loss_grace_ms must be finite and non-negative")
+        if not math.isfinite(initial_gripper) or not -1.0 <= initial_gripper <= 1.0:
+            raise ValueError("initial_gripper must be within [-1, 1]")
         self.context = context
         self.calibration = calibration
         self.no_gate = no_gate
@@ -59,7 +62,7 @@ class DirectQuestTargetSource:
         self.gate_open = bool(no_gate)
         self.gate_armed = bool(no_gate or allow_initial_high)
         self.initial_high_warned = False
-        self.gripper = -1.0
+        self.gripper = float(initial_gripper)
         self.prev_flag = False
         self.remote_count = 0
         self.raw_remote_count = 0

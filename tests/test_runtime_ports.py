@@ -31,3 +31,12 @@ def test_session_launcher_appends_common_args_without_expanding_an_empty_array()
 
     assert "BACKEND_ARGS+=(" in launcher
     assert '  "${BACKEND_ARGS[@]}"\n)' not in launcher
+
+
+def test_forcevla_session_starts_with_closed_gripper() -> None:
+    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'if [[ "$BACKEND" == "mujoco" ]]; then\n  INITIAL_GRIPPER="closed"' in launcher
+    assert '--initial-gripper "$INITIAL_GRIPPER"' in launcher

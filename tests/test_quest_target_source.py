@@ -14,7 +14,7 @@ def unused_tcp_port():
         return listener.getsockname()[1]
 
 
-def make_source():
+def make_source(*, initial_gripper: float = -1.0):
     context = zmq.Context()
     remote_port = unused_tcp_port()
     pause_port = unused_tcp_port()
@@ -30,9 +30,21 @@ def make_source():
         trajectory_gate_pause="High",
         allow_initial_high=True,
         gripper_mode="toggle",
+        initial_gripper=initial_gripper,
         tracking_loss_grace_ms=120.0,
     )
     return context, source
+
+
+def test_initial_gripper_state_is_configurable_for_held_start_tasks():
+    context, source = make_source(initial_gripper=1.0)
+    try:
+        target = source._update_remote(VALID, received_monotonic_ns=1_000_000_000)
+        assert target is not None
+        assert target.gripper == 1.0
+    finally:
+        source.close()
+        context.term()
 
 
 def test_isolated_origin_placeholder_does_not_break_tracking():
