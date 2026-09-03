@@ -4,7 +4,7 @@
   "description": "Compact operator controls for the canonical Quest teleoperation services.",
   "publisher": "pengyue-robotics",
   "homepage": "https://github.com/pengyue-polaron/quest-trajectory-recorder",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "license": "MIT",
   "main": "./dist/extension.js",
   "keywords": [
