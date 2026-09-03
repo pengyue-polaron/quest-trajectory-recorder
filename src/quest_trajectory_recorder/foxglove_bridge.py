@@ -146,6 +146,39 @@ DIAGNOSTIC_ARRAY_SCHEMA = {
     "required": ["header", "status"],
 }
 
+OPERATOR_STATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string"},
+        "severity": {"type": "string", "enum": ["ok", "warn", "error", "stale"]},
+        "quest": {"type": "string"},
+        "controller": {"type": "string"},
+        "backend": {"type": "string"},
+        "view": {"type": "string"},
+        "controller_position_m": {
+            "type": ["array", "null"],
+            "items": {"type": "number"},
+            "minItems": 3,
+            "maxItems": 3,
+        },
+        "gate_open": {"type": "boolean"},
+        "recording": {"type": "boolean"},
+        "episode_id": {"type": ["string", "null"]},
+    },
+    "required": [
+        "status",
+        "severity",
+        "quest",
+        "controller",
+        "backend",
+        "view",
+        "controller_position_m",
+        "gate_open",
+        "recording",
+        "episode_id",
+    ],
+}
+
 DIAGNOSTIC_OK = 0
 DIAGNOSTIC_WARN = 1
 DIAGNOSTIC_ERROR = 2
@@ -310,6 +343,91 @@ def diagnostic_array(
     }
 
 
+def operator_state(
+    *,
+    timestamp_ns: int,
+    source_status: dict[str, Any] | None,
+    source_age_sec: float | None,
+    target: TeleopTarget | None,
+    target_age_sec: float | None,
+    feedback: TeleopFeedback | None,
+    feedback_age_sec: float | None,
+) -> dict[str, Any]:
+    """Return the terse, typed state consumed by the React operator panel."""
+
+    diagnostics = diagnostic_array(
+        timestamp_ns=timestamp_ns,
+        source_status=source_status,
+        source_age_sec=source_age_sec,
+        target=target,
+        target_age_sec=target_age_sec,
+        feedback=feedback,
+        feedback_age_sec=feedback_age_sec,
+    )["status"][0]
+    values = {item["key"]: item["value"] for item in diagnostics["values"]}
+    level = int(diagnostics["level"])
+    severity = {
+        DIAGNOSTIC_OK: "ok",
+        DIAGNOSTIC_WARN: "warn",
+        DIAGNOSTIC_ERROR: "error",
+        DIAGNOSTIC_STALE: "stale",
+    }.get(level, "error")
+    target_fresh = target is not None and target_age_sec is not None and target_age_sec <= 0.5
+    position = (
+        [float(item) for item in target.position]
+        if target_fresh and target is not None and target.tracking_valid
+        else None
+    )
+    streaming = values.get("Streaming", "UNKNOWN")
+    if streaming.startswith("ON"):
+        controller = "Streaming"
+    elif streaming.startswith("PAUSED"):
+        controller = "Paused · press B"
+    elif streaming.startswith("OFFLINE"):
+        controller = "Offline · move controller"
+    else:
+        controller = "Waiting"
+
+    feedback_fresh = bool(
+        feedback is not None
+        and feedback_age_sec is not None
+        and feedback_age_sec <= _BACKEND_STALE_SEC
+    )
+    if feedback_fresh and feedback is not None:
+        backend_names = {
+            "forcevla_mujoco": "ForceVLA",
+            "robotteambench_maniskill": "ManiSkill",
+        }
+        backend = backend_names.get(feedback.backend, feedback.backend)
+        loop_hz = feedback.diagnostics.get("loop_hz")
+        if isinstance(loop_hz, (int, float)):
+            backend += f" · {float(loop_hz):.0f} Hz"
+        camera_age_ms = feedback.diagnostics.get("camera_age_ms")
+        if isinstance(camera_age_ms, (int, float)):
+            effective_age_ms = float(camera_age_ms) + float(feedback_age_sec or 0.0) * 1000.0
+            view_state = "Live" if effective_age_ms <= 125.0 else "Delayed"
+            view = f"{view_state} · {effective_age_ms:.0f} ms"
+        else:
+            view = "Waiting"
+    else:
+        backend = "Offline"
+        view = "Offline"
+
+    quest = str(values.get("Quest online", "OFFLINE")).title()
+    return {
+        "status": str(diagnostics["message"]),
+        "severity": severity,
+        "quest": quest,
+        "controller": controller,
+        "backend": backend,
+        "view": view,
+        "controller_position_m": position,
+        "gate_open": bool(target_fresh and target is not None and target.gate_open),
+        "recording": bool(feedback_fresh and feedback is not None and feedback.recording),
+        "episode_id": feedback.episode_id if feedback_fresh and feedback is not None else None,
+    }
+
+
 class CommandRouter:
     """Translate Foxglove services into acknowledged backend commands."""
 
@@ -463,26 +581,11 @@ def foxglove_deep_link(*, websocket_url: str, layout_id: str = "") -> str:
     return f"https://app.foxglove.dev/~/view?{urlencode(parameters)}"
 
 
-def open_foxglove(deep_link: str, *, force_new_tab: bool = False) -> str:
-    """Open the operator view without accumulating duplicate desktop tabs."""
+def open_foxglove(deep_link: str) -> str:
+    """Open the exact data source and layout, even when Desktop is running."""
 
-    running = False
-    if not force_new_tab:
-        try:
-            running = (
-                subprocess.run(
-                    ["pgrep", "-x", "Foxglove"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                ).returncode
-                == 0
-            )
-        except FileNotFoundError:
-            pass
-    command = ["open", "-a", "Foxglove"] if running else ["open", deep_link]
-    subprocess.run(command, check=False)
-    return "existing Foxglove window" if running else "new Foxglove tab"
+    subprocess.run(["open", deep_link], check=False)
+    return "requested data source and layout"
 
 
 class FoxgloveTeleopBridge:
@@ -558,6 +661,12 @@ class FoxgloveTeleopBridge:
                 encoding="jsonschema",
                 data=json.dumps(DIAGNOSTIC_ARRAY_SCHEMA, separators=(",", ":")).encode(),
             ),
+            message_encoding="json",
+            context=self.foxglove_context,
+        )
+        self.operator_state_channel = foxglove.Channel(
+            "/teleop/operator_state",
+            schema=OPERATOR_STATE_SCHEMA,
             message_encoding="json",
             context=self.foxglove_context,
         )
@@ -689,22 +798,26 @@ class FoxgloveTeleopBridge:
         if now - self.last_diagnostics_at < 0.2:
             return
         timestamp_ns = time.time_ns()
-        value = diagnostic_array(
-            timestamp_ns=timestamp_ns,
-            source_status=self.latest_source_status,
-            source_age_sec=(
+        state_inputs = {
+            "timestamp_ns": timestamp_ns,
+            "source_status": self.latest_source_status,
+            "source_age_sec": (
                 None if self.latest_source_at is None else max(0.0, now - self.latest_source_at)
             ),
-            target=self.latest_target,
-            target_age_sec=(
+            "target": self.latest_target,
+            "target_age_sec": (
                 None if self.latest_target_at is None else max(0.0, now - self.latest_target_at)
             ),
-            feedback=self.latest_feedback,
-            feedback_age_sec=(
+            "feedback": self.latest_feedback,
+            "feedback_age_sec": (
                 None if self.latest_feedback_at is None else max(0.0, now - self.latest_feedback_at)
             ),
+        }
+        value = diagnostic_array(
+            **state_inputs,
         )
         self.diagnostics_channel.log(value, log_time=timestamp_ns)
+        self.operator_state_channel.log(operator_state(**state_inputs), log_time=timestamp_ns)
         self.last_diagnostics_at = now
 
     def close(self) -> None:
@@ -725,11 +838,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open-foxglove", action="store_true")
-    parser.add_argument(
-        "--new-foxglove-tab",
-        action="store_true",
-        help="Open a new deep-link tab even when Foxglove Desktop is already running.",
-    )
     parser.add_argument(
         "--layout-id",
         default=DEFAULT_FOXGLOVE_LAYOUT_ID,
@@ -767,10 +875,7 @@ def main(argv: list[str] | None = None) -> int:
             websocket_url=url,
             layout_id=args.layout_id,
         )
-        opened = open_foxglove(
-            deep_link,
-            force_new_tab=args.new_foxglove_tab,
-        )
+        opened = open_foxglove(deep_link)
         print(f"Foxglove UI: activated {opened}.", flush=True)
     started = time.monotonic()
     try:

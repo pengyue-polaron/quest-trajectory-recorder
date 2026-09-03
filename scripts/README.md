@@ -1,5 +1,9 @@
 # Script map
 
+Run `just` from the repository root for the supported human/Agent command
+surface. Scripts in this directory are the implementation layer behind those
+recipes and remain directly callable for debugging.
+
 ## Primary workflow
 
 - `run_quest_session.sh`: the only maintained ManiSkill/MuJoCo collection
@@ -15,6 +19,10 @@
 - `start_frankabot.sh`: wait for ADB, install/start or re-focus the recovered
   Quest APK, and configure all reverse ports.
 - `run_quest_doctor.sh`: read-only ADB/APK/reverse-port/calibration checks.
+
+Prefer `just adb-status`, `just adb-prepare`, and `just adb-focus` for recovery.
+`just adb-restart` is the only routine command that intentionally restarts the
+running Quest app.
 
 ## Low-level components
 

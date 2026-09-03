@@ -30,13 +30,10 @@ def test_adb_health_check_never_blocks_caller_thread() -> None:
     monitor = _AdbHealthMonitor(
         required_ports=[8100, 8125],
         check_sec=60.0,
-        manage_app=False,
-        app_refocus_sec=10.0,
         initial_device={"adb_connected": True},
         connected_fn=connected,
         reverse_ports_fn=lambda: {8100, 8125},
         setup_reverse_fn=lambda _ports: None,
-        focus_fn=lambda: None,
         device_info_fn=lambda: {
             "adb_connected": True,
             "model": "Quest 3",
@@ -59,17 +56,13 @@ def test_adb_health_check_never_blocks_caller_thread() -> None:
 
 def test_adb_health_monitor_restores_ports_without_restarting_active_app() -> None:
     restored: list[list[int]] = []
-    focus_calls: list[bool] = []
     monitor = _AdbHealthMonitor(
         required_ports=[8125, 8100, 8126, 8127],
         check_sec=60.0,
-        manage_app=True,
-        app_refocus_sec=10.0,
         initial_device={"adb_connected": False},
         connected_fn=lambda: True,
         reverse_ports_fn=lambda: {8100, 8125},
         setup_reverse_fn=lambda ports: restored.append(ports),
-        focus_fn=lambda: focus_calls.append(True),
         device_info_fn=lambda: {
             "adb_connected": True,
             "model": "Quest 3",
@@ -84,7 +77,6 @@ def test_adb_health_monitor_restores_ports_without_restarting_active_app() -> No
         monitor.close()
 
     assert restored == [[8126, 8127]]
-    assert focus_calls == []
     assert update.device["adb_connected"] is True
     assert update.events == (
         "ADB reverse mappings restored: [8126, 8127]",
@@ -103,18 +95,15 @@ def test_adb_health_monitor_debounces_one_failed_probe() -> None:
     monitor = _AdbHealthMonitor(
         required_ports=[8100, 8125],
         check_sec=60.0,
-        manage_app=True,
-        app_refocus_sec=10.0,
         initial_device=initial,
         connected_fn=lambda: next(states),
         reverse_ports_fn=lambda: {8100, 8125},
         setup_reverse_fn=lambda _ports: None,
-        focus_fn=lambda: None,
         device_info_fn=lambda: initial,
     )
 
-    transient = monitor._check_once(1.0)
-    recovered = monitor._check_once(2.0)
+    transient = monitor._check_once()
+    recovered = monitor._check_once()
 
     assert transient.device == initial
     assert transient.events == ()
@@ -147,35 +136,20 @@ def test_source_state_treats_pose_silence_while_b_released_as_paused() -> None:
     )
 
 
-def test_adb_health_monitor_repairs_lost_app_focus() -> None:
-    focus_calls: list[bool] = []
-    device_states = iter(
-        [
-            {
-                "adb_connected": True,
-                "model": "Quest 3",
-                "serial": "serial",
-                "app_resumed": False,
-            },
-            {
-                "adb_connected": True,
-                "model": "Quest 3",
-                "serial": "serial",
-                "app_resumed": True,
-            },
-        ]
-    )
+def test_adb_health_monitor_reports_lost_focus_without_restarting_app() -> None:
     monitor = _AdbHealthMonitor(
         required_ports=[8100, 8125],
         check_sec=60.0,
-        manage_app=True,
-        app_refocus_sec=0.0,
         initial_device={"adb_connected": True},
         connected_fn=lambda: True,
         reverse_ports_fn=lambda: {8100, 8125},
         setup_reverse_fn=lambda _ports: None,
-        focus_fn=lambda: focus_calls.append(True),
-        device_info_fn=lambda: next(device_states),
+        device_info_fn=lambda: {
+            "adb_connected": True,
+            "model": "Quest 3",
+            "serial": "serial",
+            "app_resumed": False,
+        },
     )
     monitor.start()
     try:
@@ -183,22 +157,18 @@ def test_adb_health_monitor_repairs_lost_app_focus() -> None:
     finally:
         monitor.close()
 
-    assert focus_calls == [True]
-    assert update.device["app_resumed"] is True
-    assert update.events == ("FrankaBot lost focus and was restored.",)
+    assert update.device["app_resumed"] is False
+    assert update.events == ()
 
 
 def test_adb_health_monitor_shutdown_interrupts_long_schedule_wait() -> None:
     monitor = _AdbHealthMonitor(
         required_ports=[8100, 8125],
         check_sec=60.0,
-        manage_app=False,
-        app_refocus_sec=10.0,
         initial_device={"adb_connected": True},
         connected_fn=lambda: True,
         reverse_ports_fn=lambda: {8100, 8125},
         setup_reverse_fn=lambda _ports: None,
-        focus_fn=lambda: None,
         device_info_fn=lambda: {"adb_connected": True, "app_resumed": True},
     )
     monitor.start()

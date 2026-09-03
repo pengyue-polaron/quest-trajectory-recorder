@@ -1,5 +1,5 @@
 import { PanelExtensionContext } from "@foxglove/extension";
-import { ReactElement, useCallback, useEffect, useRef, useState } from "react";
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import "./styles.css";
@@ -9,6 +9,21 @@ type CommandResponse = {
   applied?: boolean;
   message?: string;
 };
+
+type OperatorState = {
+  status: string;
+  severity: "ok" | "warn" | "error" | "stale";
+  quest: string;
+  controller: string;
+  backend: string;
+  view: string;
+  controller_position_m: number[] | null;
+  gate_open: boolean;
+  recording: boolean;
+  episode_id: string | null;
+};
+
+const OPERATOR_STATE_TOPIC = "/teleop/operator_state";
 
 type Control = {
   id: string;
@@ -48,7 +63,7 @@ const CONTROL_GROUPS: ControlGroup[] = [
     controls: [
       {
         id: "previous",
-        label: "← Previous",
+        label: "Previous",
         service: "/teleop/episode/previous",
         title: "Load the previous episode seed",
       },
@@ -60,7 +75,7 @@ const CONTROL_GROUPS: ControlGroup[] = [
       },
       {
         id: "next",
-        label: "Next →",
+        label: "Next",
         service: "/teleop/episode/next",
         title: "Load the next episode seed",
       },
@@ -71,14 +86,14 @@ const CONTROL_GROUPS: ControlGroup[] = [
     controls: [
       {
         id: "record",
-        label: "● Start",
+        label: "Start",
         service: "/teleop/recording/start",
         title: "Start a synchronized action and camera recording",
         tone: "primary",
       },
       {
         id: "save",
-        label: "■ Save",
+        label: "Save",
         service: "/teleop/recording/stop",
         title: "Finalize and save the current recording",
       },
@@ -108,9 +123,38 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function asOperatorState(value: unknown): OperatorState | undefined {
+  if (typeof value !== "object" || value == undefined) {
+    return undefined;
+  }
+  const state = value as Partial<OperatorState>;
+  if (
+    typeof state.status !== "string" ||
+    typeof state.quest !== "string" ||
+    typeof state.controller !== "string" ||
+    typeof state.backend !== "string" ||
+    typeof state.view !== "string" ||
+    typeof state.recording !== "boolean"
+  ) {
+    return undefined;
+  }
+  return state as OperatorState;
+}
+
+function positionText(position: number[] | null | undefined): string {
+  if (position?.length !== 3) {
+    return "Position unavailable";
+  }
+  const format = (value: number): string => `${value >= 0 ? "+" : ""}${value.toFixed(3)}`;
+  return `x ${format(position[0]!)}  y ${format(position[1]!)}  z ${format(position[2]!)}`;
+}
+
 function TeleopControls({ context }: { context: PanelExtensionContext }): ReactElement {
   const [pending, setPending] = useState<string>();
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string }>();
+  const [operatorState, setOperatorState] = useState<OperatorState>();
+  const [lastStateAt, setLastStateAt] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const noticeTimer = useRef<number>();
   const requestInFlight = useRef(false);
 
@@ -128,6 +172,59 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
     },
     [],
   );
+
+  useEffect(() => {
+    context.watch("currentFrame");
+    context.subscribe([{ topic: OPERATOR_STATE_TOPIC }]);
+    context.onRender = (renderState, done) => {
+      try {
+        for (const event of renderState.currentFrame ?? []) {
+          if (event.topic !== OPERATOR_STATE_TOPIC) {
+            continue;
+          }
+          const next = asOperatorState(event.message);
+          if (next != undefined) {
+            setOperatorState(next);
+            setLastStateAt(Date.now());
+          }
+        }
+      } finally {
+        done();
+      }
+    };
+    return () => {
+      context.onRender = undefined;
+      context.subscribe([]);
+    };
+  }, [context]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 250);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const connected = lastStateAt > 0 && now - lastStateAt <= 1500;
+  const displayState = connected ? operatorState : undefined;
+  const status = displayState?.status ?? (lastStateAt > 0 ? "Disconnected" : "Connecting…");
+  const severity = displayState?.severity ?? (lastStateAt > 0 ? "error" : "stale");
+
+  const enabledControls = useMemo(() => {
+    if (!connected || operatorState == undefined) {
+      return new Set<string>();
+    }
+    const controls = new Set(["hold", "resume", "previous", "reset", "next"]);
+    if (operatorState.recording) {
+      controls.add("save");
+      controls.add("discard");
+    } else {
+      controls.add("record");
+    }
+    return controls;
+  }, [connected, operatorState]);
 
   const run = useCallback(
     async (control: Control) => {
@@ -164,15 +261,41 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
 
   return (
     <div className="teleop-panel" aria-busy={pending != undefined}>
+      <section className="teleop-status" aria-live="polite">
+        <div className="teleop-status-headline">
+          <span className={`teleop-status-dot teleop-status-dot--${severity}`} aria-hidden="true" />
+          <strong>{status}</strong>
+          {displayState?.recording === true ? <span className="teleop-recording">Recording</span> : null}
+        </div>
+        <dl className="teleop-facts">
+          <div>
+            <dt>Quest</dt>
+            <dd>{displayState?.quest ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>Controller</dt>
+            <dd>{displayState?.controller ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>Backend</dt>
+            <dd>{displayState?.backend ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>View</dt>
+            <dd>{displayState?.view ?? "—"}</dd>
+          </div>
+        </dl>
+        <div className="teleop-position">{positionText(displayState?.controller_position_m)}</div>
+      </section>
       <div className="teleop-groups">
         {CONTROL_GROUPS.map((group) => (
           <section className="teleop-group" key={group.label}>
-            <div className="teleop-group-label">{group.label}</div>
+            <h2 className="teleop-group-label">{group.label}</h2>
             <div className="teleop-buttons">
               {group.controls.map((control) => (
                 <button
                   className={`teleop-button${control.tone ? ` teleop-button--${control.tone}` : ""}`}
-                  disabled={pending != undefined}
+                  disabled={pending != undefined || !enabledControls.has(control.id)}
                   key={control.id}
                   onClick={() => {
                     void run(control);
@@ -189,6 +312,7 @@ function TeleopControls({ context }: { context: PanelExtensionContext }): ReactE
       </div>
       <div
         className={`teleop-notice${notice ? ` teleop-notice--${notice.tone}` : ""}`}
+        aria-live="polite"
         role="status"
       >
         {notice?.text ?? ""}

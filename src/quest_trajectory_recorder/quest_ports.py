@@ -6,6 +6,7 @@ import subprocess
 from typing import Any
 
 DEFAULT_GRIPPER_PORT = 8127
+QUEST_REVERSE_PORTS = (8087, 8095, 8100, 8105, 8110, 8125, 8126, 8127, 10505, 15001)
 QUEST_PACKAGE = "com.Xigbee.FrankaBot"
 QUEST_ACTIVITY = "com.unity3d.player.UnityPlayerActivity"
 QUEST_VR_CATEGORY = "com.oculus.intent.category.VR"
@@ -70,9 +71,9 @@ def adb_connected() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "device"
 
 
-def quest_activity_resumed() -> bool:
+def quest_activity_resumed(*, assume_connected: bool = False) -> bool:
     """Return whether the controller-tracking Unity activity owns XR focus."""
-    if not adb_connected():
+    if not assume_connected and not adb_connected():
         return False
     try:
         result = subprocess.run(
@@ -90,8 +91,8 @@ def quest_activity_resumed() -> bool:
     )
 
 
-def focus_frankabot(*, close_panels: bool = True) -> None:
-    """Restore the installed FrankaBot app without changing its calibration."""
+def focus_frankabot(*, close_panels: bool = True, restart: bool = False) -> None:
+    """Bring FrankaBot forward, restarting it only when explicitly requested."""
     if not adb_connected():
         raise RuntimeError("Quest is not connected through ADB")
     if close_panels:
@@ -103,13 +104,11 @@ def focus_frankabot(*, close_panels: bool = True) -> None:
                 stderr=subprocess.DEVNULL,
                 timeout=5.0,
             )
-    subprocess.run(
+    command = ["adb", "shell", "am", "start"]
+    if restart:
+        command.append("-S")
+    command.extend(
         [
-            "adb",
-            "shell",
-            "am",
-            "start",
-            "-S",
             "-a",
             "android.intent.action.MAIN",
             "-c",
@@ -119,7 +118,10 @@ def focus_frankabot(*, close_panels: bool = True) -> None:
             "--es",
             "unity",
             "-force-gles",
-        ],
+        ]
+    )
+    subprocess.run(
+        command,
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -155,5 +157,5 @@ def quest_device_info() -> dict[str, Any]:
         "adb_connected": True,
         "model": value("shell", "getprop", "ro.product.model"),
         "serial": value("get-serialno"),
-        "app_resumed": quest_activity_resumed(),
+        "app_resumed": quest_activity_resumed(assume_connected=True),
     }

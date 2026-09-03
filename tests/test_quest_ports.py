@@ -26,7 +26,7 @@ def test_adb_reverse_ports_parses_quest_mappings(monkeypatch) -> None:
     assert adb_reverse_ports() == {8100, 8125}
 
 
-def test_focus_frankabot_clears_launch_dialog_and_starts_vr_activity(
+def test_focus_frankabot_clears_launch_dialog_and_resumes_vr_activity(
     monkeypatch,
 ) -> None:
     calls: list[list[str]] = []
@@ -48,7 +48,6 @@ def test_focus_frankabot_clears_launch_dialog_and_starts_vr_activity(
         "shell",
         "am",
         "start",
-        "-S",
         "-a",
         "android.intent.action.MAIN",
         "-c",
@@ -58,4 +57,36 @@ def test_focus_frankabot_clears_launch_dialog_and_starts_vr_activity(
         "--es",
         "unity",
         "-force-gles",
+    ]
+
+
+def test_focus_frankabot_restarts_only_when_requested(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(quest_ports, "adb_connected", lambda: True)
+    monkeypatch.setattr(subprocess, "run", run)
+
+    quest_ports.focus_frankabot(close_panels=False, restart=True)
+
+    assert calls == [
+        [
+            "adb",
+            "shell",
+            "am",
+            "start",
+            "-S",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            QUEST_VR_CATEGORY,
+            "-n",
+            f"{QUEST_PACKAGE}/{quest_ports.QUEST_ACTIVITY}",
+            "--es",
+            "unity",
+            "-force-gles",
+        ]
     ]

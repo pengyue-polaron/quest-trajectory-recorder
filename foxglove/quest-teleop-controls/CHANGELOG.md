@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- Show live Quest, controller, backend, camera-latency, and recording state in
+  the same compact panel as the acknowledged controls.
+- Disable commands when the WebSocket state heartbeat is stale and make
+  recording actions reflect the backend state.
+
 ## 1.0.5
 
 - Arrange the camera panels side by side at a near-native aspect ratio.

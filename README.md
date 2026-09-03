@@ -15,6 +15,24 @@ only collection observation and control UI; the browser page is retained only
 for Quest calibration.
 See `docs/architecture.md` for the full module map.
 
+## Daily workflow
+
+The repository exposes one small `just` command surface for both people and
+Agents. Run `just` to list it. The normal physical workflow is:
+
+```bash
+just adb-status
+just calibrate lab                 # only when the physical setup changed
+just forcevla lab --record         # ForceVLA / MuJoCo
+just maniskill lab cube_sort --record
+```
+
+`just adb-prepare` repairs ADB reverse mappings and brings FrankaBot forward
+without restarting it. `just adb-focus` is the next recovery step if a Meta
+panel stole focus. `just adb-restart` is deliberately explicit and should be
+used only when the app itself is wedged. The session health monitor never
+restarts the Quest app in the middle of an operation.
+
 ## Supported Quest Application
 
 This repository is intended for the controller-tracking Quest application installed as:
@@ -65,16 +83,16 @@ safety behavior, and physical-controller checklist are documented in
 The maintained flow is one supervised command:
 
 ```bash
-scripts/run_quest_session.sh --backend maniskill --profile desk --task cube_sort --record
-# or
-scripts/run_quest_session.sh --backend mujoco --profile desk --record
+just maniskill lab cube_sort --record
+just forcevla lab --record
 ```
 
 The launcher owns the target source, selected backend, and Foxglove gateway as
 one supervised service set. The organization layout `Quest Unified Teleop` connects to
-`ws://127.0.0.1:8765`. For a no-controller test, replace `--profile desk` with
-`--synthetic`. See [`scripts/README.md`](scripts/README.md) for the intentionally
-small script surface.
+`ws://127.0.0.1:8765`. For a no-controller test, use `just
+synthetic-forcevla` or `just synthetic-maniskill`. See
+[`scripts/README.md`](scripts/README.md) for the intentionally small script
+surface.
 
 After a profile exists, that single command is the complete physical workflow:
 it waits for USB/ADB, configures every reverse port, brings FrankaBot to the
@@ -89,12 +107,12 @@ Meta may put a controller into `CONNECTED_INACTIVE` when the headset is not
 worn. ADB can still look healthy in that state, but 6DoF input is unavailable.
 The launcher clears Oculus first-time/system dialogs that can otherwise block
 an ADB-started VR activity, then starts FrankaBot explicitly in the Quest VR
-category. The health monitor repeats the same recovery after a focus loss.
-Foxglove's native Diagnostics panel shows only the B-button streaming state,
-the live controller pose, and whether Quest is online. A single compact React
-panel groups every safety, episode, and recording action and waits for the
-backend acknowledgement before enabling the next action. Its headline also
-makes tracking loss or a stalled backend immediately visible.
+category. During collection, the health monitor only restores lost reverse
+ports and reports app focus; it never restarts FrankaBot. One compact React
+panel shows Quest, controller/B, backend-loop, and view-latency state alongside
+acknowledged safety, episode, and recording actions. Standard Foxglove
+diagnostics remain published for engineering inspection without duplicating
+the operator-facing status.
 
 For the ForceVLA MuJoCo backend, the source starts the canonical gripper state
 closed and the backend starts below the socket in its held-connector pose.
@@ -108,6 +126,9 @@ cd ~/Codespace/quest-trajectory-recorder
 scripts/setup.sh
 source .venv/bin/activate
 ```
+
+Install `just` once on macOS with `brew install just`; `scripts/setup.sh`
+remains available as the bootstrap command before `just` is installed.
 
 `scripts/setup.sh` installs the sibling `../embodied-ops` checkout first. Set
 `EMBODIED_OPS_ROOT` if the repositories are not siblings.
@@ -196,10 +217,10 @@ For reusable named calibration profiles, prefer:
 
 ```bash
 cd ~/Codespace/quest-trajectory-recorder
-scripts/run_calibration.sh quest_teleop_frame
+just calibrate lab
 ```
 
-This writes `calibrations/quest_teleop_frame.json`. Use a different profile name for
+This writes `calibrations/lab.json`. Use a different profile name for
 a different table / chair / camera setup. The web UI also has a `Profile`
 section, so you can load an existing profile or save the current calibration
 under a new name without restarting the server.
@@ -248,19 +269,18 @@ The live viewer also writes `captures/live_*_remote.csv` unless started with `--
 If the web viewer is connected but the controller pose freezes at the exact origin
 `0,0,0`, or the Quest shows Meta / Oculus system panels instead of giving the
 FrankaBot app focus, the APK is usually still running but no longer receiving
-effective VR tracking focus. Refocus it from the Mac:
+effective VR tracking focus. Check and recover it from the Mac:
 
 ```bash
-adb shell am force-stop com.oculus.panelapp.library
-adb shell am force-stop com.oculus.store
-adb shell am start -n com.Xigbee.FrankaBot/com.unity3d.player.UnityPlayerActivity --es unity "-force-gles"
+just adb-status
+just adb-focus
 ```
 
-`scripts/start_frankabot.sh` does this automatically after launch. Use
-`--keep-panels` only if you intentionally want to leave Oculus panels open.
-The tracker hub restores reverse ports after confirmed ADB disconnects and
-refocuses FrankaBot only when its activity actually lost focus; restarting the
-whole session is normally unnecessary.
+If soft focus is not enough, run `just adb-restart` once. This is intentionally
+separate because restarting the Unity activity invalidates the current Quest
+stream. `scripts/start_frankabot.sh` performs that fresh start only during an
+explicit session/calibration launch. The tracker hub restores reverse ports
+after confirmed ADB disconnects, but never changes app lifecycle state.
 
 
 ## Output Files

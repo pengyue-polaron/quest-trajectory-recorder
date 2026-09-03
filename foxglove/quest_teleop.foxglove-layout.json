@@ -32,13 +32,6 @@
       },
       "foxglovePanelTitle": "Wrist camera"
     },
-    "DiagnosticStatusPanel!quest-controller": {
-      "topicToRender": "/teleop/diagnostics",
-      "selectedHardwareId": "quest-teleop",
-      "selectedName": "Teleop/Controller",
-      "splitFraction": 0.32,
-      "foxglovePanelTitle": "Quest controller"
-    },
     "Plot!wrist-force": {
       "paths": [
         {"value": "/teleop/telemetry.force_x_N", "enabled": true, "timestampMethod": "receiveTime", "color": "#ef5350", "label": "Fx", "showLine": true},
@@ -72,7 +65,7 @@
       "foxglovePanelTitle": "Wrist torque (N·m)"
     },
     "quest-teleop-controls.controls!quest-controls": {
-      "foxglovePanelTitle": "Controls"
+      "foxglovePanelTitle": "Teleop"
     }
   },
   "globalVariables": {},
@@ -97,12 +90,7 @@
       },
       "splitPercentage": 50
     },
-    "second": {
-      "direction": "column",
-      "first": "DiagnosticStatusPanel!quest-controller",
-      "second": "quest-teleop-controls.controls!quest-controls",
-      "splitPercentage": 36
-    },
+    "second": "quest-teleop-controls.controls!quest-controls",
     "splitPercentage": 76
   }
 }

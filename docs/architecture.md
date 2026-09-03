@@ -31,7 +31,7 @@ Panels are not alternate production paths.
 | Module | Role |
 | --- | --- |
 | `receiver.py` | Raw APK text parser and raw CSV capture. |
-| `quest_ports.py` | Quest port constants plus ADB, reverse-port, and app-focus recovery. |
+| `quest_ports.py`, `device_cli.py` | Quest port constants plus explicit, scriptable ADB status, reverse-port, focus, and restart operations. |
 | `calibration_profiles.py`, `teleop_frame.py` | Named profile validation and Quest-to-teleop geometry. |
 | `teleop_target.py` | Raw Quest frame to canonical `TeleopTarget`. |
 | `quest_target_source.py` | Raw Quest socket ownership and controller gate/gripper state. |
@@ -67,15 +67,20 @@ task diagnostics, and only acknowledges a command after its effect is complete.
 ## Primary commands
 
 ```bash
-scripts/run_calibration.sh <profile>
-scripts/run_quest_session.sh --backend maniskill --profile <profile> --task cube_sort --record
-scripts/run_quest_session.sh --backend mujoco --profile <profile> --record
+just calibrate <profile>
+just maniskill <profile> cube_sort --record
+just forcevla <profile> --record
 ```
 
 `run_quest_session.sh` is the composition root. It starts one target source,
 one backend, and one Foxglove gateway, and terminates the complete child set on
 exit. Low-level component scripts remain for diagnosis and focused tests; see
 `scripts/README.md`.
+
+ADB lifecycle is asymmetric by design: background health monitoring may repair
+reverse ports and publish state, but only an explicit operator/Agent command
+may focus or restart the Quest activity. This prevents a transient ADB probe or
+Meta focus change from resetting the controller stream mid-motion.
 
 ## Extension rules
 

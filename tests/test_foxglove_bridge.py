@@ -16,6 +16,7 @@ from quest_trajectory_recorder.foxglove_bridge import (
     feedback_telemetry,
     foxglove_deep_link,
     open_foxglove,
+    operator_state,
     pose_message,
 )
 
@@ -29,6 +30,7 @@ EXPECTED_TOPICS = {
     "/teleop/target",
     "/teleop/source_status",
     "/teleop/diagnostics",
+    "/teleop/operator_state",
 }
 
 
@@ -112,7 +114,7 @@ def test_layout_uses_compact_force_and_torque_plots() -> None:
     }
     assert root["first"]["second"]["first"] == "Plot!wrist-force"
     assert root["first"]["second"]["second"] == "Plot!wrist-torque"
-    assert root["second"]["second"] == "quest-teleop-controls.controls!quest-controls"
+    assert root["second"] == "quest-teleop-controls.controls!quest-controls"
 
 
 def test_pose_message_uses_foxglove_vector_position() -> None:
@@ -237,6 +239,62 @@ def test_diagnostics_show_live_stream_and_controller_position() -> None:
     assert status["level"] == 0
     assert status["message"] == "Streaming"
     assert status["values"][1]["value"] == "x +0.123  y -0.200  z +0.030"
+
+
+def test_operator_state_summarizes_backend_and_view_latency() -> None:
+    target = TeleopTarget(
+        seq=9,
+        timestamp=1.0,
+        position=[0.1234, -0.2, 0.03],
+        rotation=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        gripper=-1.0,
+        gate_open=True,
+        source="quest",
+        session_id="test",
+        frame_id=9,
+        tracking_valid=True,
+    )
+    feedback = TeleopFeedback(
+        backend="forcevla_mujoco",
+        episode_id="episode",
+        frame_index=1,
+        status="running",
+        target_seq=9,
+        target_age_ms=4.0,
+        gate_open=True,
+        recording=True,
+        eef_position=[0.0, 0.0, 0.0],
+        gripper=-1.0,
+        action=[0.0] * 7,
+        diagnostics={"mapping_reason": "active", "loop_hz": 19.8, "camera_age_ms": 52.0},
+    )
+    state = operator_state(
+        timestamp_ns=123,
+        source_status={
+            "source": "quest",
+            "stream_online": True,
+            "tracking_valid": True,
+            "gate_open": True,
+            "source_metadata": {"adb_connected": True, "app_resumed": True},
+        },
+        source_age_sec=0.1,
+        target=target,
+        target_age_sec=0.01,
+        feedback=feedback,
+        feedback_age_sec=0.02,
+    )
+    assert state == {
+        "status": "Streaming",
+        "severity": "ok",
+        "quest": "Online",
+        "controller": "Streaming",
+        "backend": "ForceVLA · 20 Hz",
+        "view": "Live · 72 ms",
+        "controller_position_m": [0.1234, -0.2, 0.03],
+        "gate_open": True,
+        "recording": True,
+        "episode_id": "episode",
+    }
 
 
 def test_fresh_target_proves_quest_online_when_status_heartbeat_is_dropped() -> None:
@@ -423,7 +481,7 @@ def test_deep_link_selects_organization_layout_and_local_bridge() -> None:
     assert "openIn=desktop" in link
 
 
-def test_open_foxglove_reuses_running_desktop_app(monkeypatch) -> None:
+def test_open_foxglove_always_opens_the_exact_deep_link(monkeypatch) -> None:
     calls: list[list[str]] = []
 
     def run(args, **_kwargs):
@@ -432,25 +490,8 @@ def test_open_foxglove_reuses_running_desktop_app(monkeypatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    assert open_foxglove("https://example.invalid/deep-link") == ("existing Foxglove window")
-    assert calls == [["pgrep", "-x", "Foxglove"], ["open", "-a", "Foxglove"]]
-
-
-def test_open_foxglove_can_force_a_new_tab(monkeypatch) -> None:
-    calls: list[list[str]] = []
-
-    def run(args, **_kwargs):
-        calls.append(args)
-        return subprocess.CompletedProcess(args, 0)
-
-    monkeypatch.setattr(subprocess, "run", run)
-
-    assert (
-        open_foxglove(
-            "https://example.invalid/deep-link",
-            force_new_tab=True,
-        )
-        == "new Foxglove tab"
+    assert open_foxglove("https://example.invalid/deep-link") == (
+        "requested data source and layout"
     )
     assert calls == [["open", "https://example.invalid/deep-link"]]
 

@@ -29,6 +29,7 @@ quest-live3d = "quest_trajectory_recorder.live3d:main"
 quest-tracker-hub = "quest_trajectory_recorder.quest_tracker_hub:main"
 quest-synthetic-target = "quest_trajectory_recorder.synthetic_target:main"
 quest-doctor = "quest_trajectory_recorder.device_doctor:main"
+quest-adb = "quest_trajectory_recorder.device_cli:main"
 quest-foxglove-bridge = "quest_trajectory_recorder.foxglove_bridge:main"
 
 [tool.setuptools.packages.find]

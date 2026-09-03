@@ -24,6 +24,9 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: bash -n scripts/*.sh
+      - uses: extractions/setup-just@v3
+      - run: just --fmt --check
+      - run: just --list
 
   foxglove-extension:
     runs-on: ubuntu-latest

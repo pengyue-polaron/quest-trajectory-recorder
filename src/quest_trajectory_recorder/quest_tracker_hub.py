@@ -60,30 +60,23 @@ class _AdbHealthMonitor:
         *,
         required_ports: list[int],
         check_sec: float,
-        manage_app: bool,
-        app_refocus_sec: float,
         initial_device: dict[str, Any],
         connected_fn: Callable[[], bool] = adb_connected,
         reverse_ports_fn: Callable[[], set[int]] = adb_reverse_ports,
         setup_reverse_fn: Callable[[list[int]], None] = setup_adb_reverse,
-        focus_fn: Callable[[], None] = focus_frankabot,
         device_info_fn: Callable[[], dict[str, Any]] = quest_device_info,
     ) -> None:
         if check_sec <= 0:
             raise ValueError("ADB health-check interval must be positive")
         self.required_ports = tuple(int(port) for port in required_ports)
         self.check_sec = float(check_sec)
-        self.manage_app = bool(manage_app)
-        self.app_refocus_sec = float(app_refocus_sec)
         self._connected_fn = connected_fn
         self._reverse_ports_fn = reverse_ports_fn
         self._setup_reverse_fn = setup_reverse_fn
-        self._focus_fn = focus_fn
         self._device_info_fn = device_info_fn
         self._previous_connected = bool(initial_device.get("adb_connected"))
         self._last_device = dict(initial_device)
         self._consecutive_disconnects = 0
-        self._last_app_refocus_at = 0.0
         self._updates: queue.SimpleQueue[_AdbHealthUpdate] = queue.SimpleQueue()
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -110,7 +103,7 @@ class _AdbHealthMonitor:
             except queue.Empty:
                 return updates
 
-    def _check_once(self, now: float) -> _AdbHealthUpdate:
+    def _check_once(self) -> _AdbHealthUpdate:
         events: list[str] = []
         connected = self._connected_fn()
         device = dict(_DISCONNECTED_DEVICE)
@@ -136,23 +129,6 @@ class _AdbHealthMonitor:
                 return _AdbHealthUpdate(device=dict(self._last_device), events=())
         if connected != self._previous_connected:
             events.append(f"ADB device {'connected' if connected else 'disconnected'}.")
-        if (
-            connected
-            and self.manage_app
-            and not device.get("app_resumed")
-            and now - self._last_app_refocus_at >= self.app_refocus_sec
-        ):
-            try:
-                self._focus_fn()
-                self._last_app_refocus_at = now
-                device = self._device_info_fn()
-                events.append(
-                    "FrankaBot refocused after ADB reconnect."
-                    if not self._previous_connected
-                    else "FrankaBot lost focus and was restored."
-                )
-            except (OSError, RuntimeError, subprocess.SubprocessError):
-                pass
         self._previous_connected = connected
         self._last_device = dict(device)
         return _AdbHealthUpdate(device=dict(device), events=tuple(events))
@@ -160,7 +136,7 @@ class _AdbHealthMonitor:
     def _run(self) -> None:
         while not self._stop.is_set():
             started = time.monotonic()
-            self._updates.put(self._check_once(started))
+            self._updates.put(self._check_once())
             remaining = max(0.0, self.check_sec - (time.monotonic() - started))
             if self._stop.wait(remaining):
                 return
@@ -178,12 +154,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--remote-port", type=int, default=DEFAULT_PORTS["remote"])
     parser.add_argument("--pause-port", type=int, default=DEFAULT_PORTS["pause"])
     parser.add_argument("--resolution-port", type=int, default=DEFAULT_PORTS["resolution"])
-    parser.add_argument(
-        "--no-manage-app",
-        action="store_true",
-        help="Do not automatically refocus FrankaBot after ADB/app reconnects.",
-    )
-    parser.add_argument("--app-refocus-sec", type=float, default=10.0)
     parser.add_argument("--gripper-port", type=int, default=DEFAULT_GRIPPER_PORT)
     parser.add_argument("--adb-reverse", action="store_true")
     parser.add_argument("--calibration", type=str, default="calibrations/quest_teleop_frame.json")
@@ -210,7 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adb-check-sec",
         type=float,
-        default=3.0,
+        default=5.0,
         help="When using ADB reverse, restore port mappings after a USB reconnect; 0 disables.",
     )
     return parser.parse_args()
@@ -256,14 +226,12 @@ def main() -> int:
         raise ValueError("--print-every must be non-negative")
     if args.status_every_sec < 0 or args.adb_check_sec < 0:
         raise ValueError("status and ADB check intervals must be non-negative")
-    if args.app_refocus_sec <= 0:
-        raise ValueError("--app-refocus-sec must be positive")
     if not math.isfinite(args.tracking_loss_grace_ms) or args.tracking_loss_grace_ms < 0:
         raise ValueError("--tracking-loss-grace-ms must be finite and non-negative")
     if args.adb_reverse:
         if adb_connected():
             setup_adb_reverse(required_ports)
-            if not args.no_manage_app and not quest_activity_resumed():
+            if not quest_activity_resumed():
                 focus_frankabot()
         else:
             print(
@@ -321,8 +289,6 @@ def main() -> int:
         _AdbHealthMonitor(
             required_ports=required_ports,
             check_sec=args.adb_check_sec,
-            manage_app=not args.no_manage_app,
-            app_refocus_sec=args.app_refocus_sec,
             initial_device=device,
         )
         if args.adb_reverse and args.adb_check_sec > 0

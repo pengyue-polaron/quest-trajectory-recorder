@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from .calibration_profiles import DEFAULT_CALIBRATION_PATH, calibration_health
+from .quest_ports import QUEST_PACKAGE
 
-QUEST_PACKAGE = "com.Xigbee.FrankaBot"
 REQUIRED_REVERSE_PORTS = (8095, 8100, 8125, 8127)
 
 
