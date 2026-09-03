@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import time
 from typing import Any
 
 from .quest_ports import (
@@ -11,6 +13,8 @@ from .quest_ports import (
     adb_connected,
     adb_reverse_ports,
     focus_frankabot,
+    keep_quest_awake,
+    quest_activity_resumed,
     quest_device_info,
     setup_adb_reverse,
 )
@@ -53,13 +57,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     status = subparsers.add_parser("status", help="Show Quest, app, and reverse-port state")
     status.add_argument("--json", action="store_true", dest="as_json")
 
-    subparsers.add_parser(
+    prepare = subparsers.add_parser(
         "prepare",
-        help="Restore reverse ports and bring FrankaBot forward without restarting it",
+        help="Wait for ADB, wake Quest, restore ports, and focus FrankaBot without restarting it",
     )
+    prepare.add_argument("--wait-seconds", type=float, default=120.0)
     subparsers.add_parser("focus", help="Bring FrankaBot forward without restarting it")
     subparsers.add_parser("restart", help="Explicitly restart FrankaBot and bring it forward")
     return parser.parse_args(argv)
+
+
+def _wait_for_adb(timeout: float) -> bool:
+    if adb_connected():
+        return True
+    print("Waiting for Quest ADB (wake the headset and authorize USB debugging)...")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        if adb_connected():
+            return True
+    return False
+
+
+def _wait_for_frankabot(timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if quest_activity_resumed(assume_connected=True):
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -69,21 +95,32 @@ def main(argv: list[str] | None = None) -> int:
         _print_status(payload, as_json=args.as_json)
         return 0 if payload["ready"] else 1
 
-    if not adb_connected():
+    if args.command == "prepare" and args.wait_seconds < 0:
+        print("--wait-seconds must be non-negative.")
+        return 2
+    wait_seconds = args.wait_seconds if args.command == "prepare" else 0.0
+    if not _wait_for_adb(wait_seconds):
         print("Quest is not connected through ADB.")
         return 1
 
-    if args.command == "prepare":
-        setup_adb_reverse(list(QUEST_REVERSE_PORTS))
-        if not quest_device_info()["app_resumed"]:
+    try:
+        if args.command == "prepare":
+            keep_quest_awake()
+            setup_adb_reverse(list(QUEST_REVERSE_PORTS))
             focus_frankabot()
-        print("Quest reverse ports are ready; FrankaBot was focused without a restart.")
-    elif args.command == "focus":
-        focus_frankabot()
-        print("FrankaBot was focused without a restart.")
-    else:
-        focus_frankabot(restart=True)
-        print("FrankaBot was explicitly restarted and focused.")
+            if not _wait_for_frankabot():
+                print("Quest is connected, but FrankaBot did not acquire XR foreground.")
+                return 1
+            print("Quest is awake; reverse ports and FrankaBot XR foreground are ready.")
+        elif args.command == "focus":
+            focus_frankabot()
+            print("FrankaBot was focused without a restart.")
+        else:
+            focus_frankabot(restart=True)
+            print("FrankaBot was explicitly restarted and focused.")
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(f"Quest preparation failed: {exc}")
+        return 1
     return 0
 
 

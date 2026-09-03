@@ -25,6 +25,29 @@ def test_calibration_page_starts_before_quest_attachment() -> None:
     assert "quest_trajectory_recorder.device_cli prepare" in launcher
 
 
+def test_calibration_ui_has_one_sequential_workflow_without_debug_sections() -> None:
+    page = (
+        Path(__file__).resolve().parents[1] / "src" / "quest_trajectory_recorder" / "live3d_web.py"
+    ).read_text(encoding="utf-8")
+
+    for label in (
+        "Start new calibration",
+        "Start collecting right",
+        "Finish right",
+        "Start collecting forward",
+        "Finish forward",
+        "Set origin",
+    ):
+        assert label in page
+    assert "Frame status" not in page
+    assert "Live data" not in page
+    assert "Quest calibration console" not in page
+    assert "Numeric teleop frame" not in page
+    assert "1. Right direction" not in page
+    assert "Start collecting, move the controller" not in page
+    assert "overflow-y: auto" in page
+
+
 def test_session_launcher_uses_protocol_probe_and_child_liveness() -> None:
     launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
         encoding="utf-8"

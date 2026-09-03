@@ -5,6 +5,7 @@ from quest_trajectory_recorder.quest_ports import (
     QUEST_BLOCKING_PACKAGES,
     QUEST_PACKAGE,
     QUEST_VR_CATEGORY,
+    activity_dump_reports_resumed,
     adb_reverse_ports,
 )
 
@@ -89,4 +90,33 @@ def test_focus_frankabot_restarts_only_when_requested(monkeypatch) -> None:
             "unity",
             "-force-gles",
         ]
+    ]
+
+
+def test_activity_detection_supports_current_quest_os_resumed_label() -> None:
+    output = """
+      mLastPausedActivity: ActivityRecord{old com.Xigbee.FrankaBot/.UnityPlayerActivity}
+      ResumedActivity: ActivityRecord{active com.Xigbee.FrankaBot/.UnityPlayerActivity}
+    """
+
+    assert activity_dump_reports_resumed(output) is True
+    assert activity_dump_reports_resumed(output.split("ResumedActivity:")[0]) is False
+
+
+def test_keep_quest_awake_applies_wake_and_power_policy(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(quest_ports, "adb_connected", lambda: True)
+    monkeypatch.setattr(subprocess, "run", run)
+
+    quest_ports.keep_quest_awake()
+
+    assert calls == [
+        ["adb", "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+        ["adb", "shell", "svc", "power", "stayon", "true"],
+        ["adb", "shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close"],
     ]

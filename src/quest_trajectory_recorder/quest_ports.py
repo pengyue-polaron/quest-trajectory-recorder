@@ -15,6 +15,12 @@ QUEST_BLOCKING_PACKAGES = (
     "com.oculus.panelapp.library",
     "com.oculus.store",
 )
+RESUMED_ACTIVITY_MARKERS = (
+    "topResumedActivity",
+    "mResumedActivity",
+    "ResumedActivity:",
+    "Resumed:",
+)
 
 
 def setup_adb_reverse(ports: list[int]) -> None:
@@ -85,10 +91,33 @@ def quest_activity_resumed(*, assume_connected: bool = False) -> bool:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
-    return result.returncode == 0 and any(
-        QUEST_PACKAGE in line and "topResumedActivity" in line
-        for line in result.stdout.splitlines()
+    return result.returncode == 0 and activity_dump_reports_resumed(result.stdout)
+
+
+def activity_dump_reports_resumed(output: str) -> bool:
+    """Handle the resumed-activity labels used across Quest OS releases."""
+    return any(
+        QUEST_PACKAGE in line and any(marker in line for marker in RESUMED_ACTIVITY_MARKERS)
+        for line in output.splitlines()
     )
+
+
+def keep_quest_awake() -> None:
+    """Best-effort wake and power policy used by explicit session preparation."""
+    if not adb_connected():
+        raise RuntimeError("Quest is not connected through ADB")
+    for command in (
+        ["adb", "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+        ["adb", "shell", "svc", "power", "stayon", "true"],
+        ["adb", "shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close"],
+    ):
+        subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+        )
 
 
 def focus_frankabot(*, close_panels: bool = True, restart: bool = False) -> None:

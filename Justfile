@@ -20,7 +20,7 @@ adb-status:
 adb-status-json:
     @.venv/bin/python -m quest_trajectory_recorder.device_cli status --json
 
-# Repair ADB reverse ports and focus FrankaBot without restarting it.
+# Wait for ADB, wake Quest, restore ports, and verify FrankaBot XR foreground.
 adb-prepare:
     @.venv/bin/python -m quest_trajectory_recorder.device_cli prepare
 

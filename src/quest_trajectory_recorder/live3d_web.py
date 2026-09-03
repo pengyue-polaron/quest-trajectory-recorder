@@ -20,7 +20,7 @@ HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Quest Teleop Frame</title>
+  <title>Quest Calibration</title>
   <style>
     :root {
       --bg: #f6f6f6;
@@ -39,62 +39,47 @@ HTML = r"""<!doctype html>
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      min-height: 100vh;
+      padding: 16px;
+      height: 100vh;
+      overflow: hidden;
       color: var(--ink);
       background: var(--bg);
       font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 14px;
     }
-    .wrap { width: min(1380px, calc(100vw - 32px)); margin: 16px auto; }
-    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 12px; }
-    h1 { margin: 0 0 4px; font-size: 24px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em; }
-    .subtitle { margin: 0; color: var(--muted); line-height: 1.45; }
-    .status { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 330px; color: var(--muted); }
-    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--page); color: var(--ink); font-size: 12px; font-weight: 500; }
+    .wrap { width: min(1480px, 100%); height: 100%; margin: 0 auto; display: flex; flex-direction: column; }
+    header { flex: 0 0 auto; margin-bottom: 12px; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
     .dot.on { background: var(--green); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 12px; align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: 12px; align-items: stretch; flex: 1 1 auto; min-height: 0; }
     .stage, .side { border: 1px solid var(--line); border-radius: 8px; background: var(--page); box-shadow: var(--shadow); overflow: hidden; }
-    .stage-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fafafa; }
+    .stage { display: flex; flex-direction: column; min-height: 0; }
+    .stage-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fafafa; }
+    .stage-info { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; min-width: 0; }
     .stage-title { font-weight: 600; }
     .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
+    .stage-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+    .stage-actions button { padding: 5px 9px; font-size: 12px; }
     .swatch { display: inline-flex; align-items: center; gap: 5px; }
     .swatch::before { content: ""; width: 13px; height: 2px; border-radius: 999px; background: currentColor; }
     .right { color: var(--red); } .forward { color: var(--green); } .up { color: var(--blue); } .start { color: var(--green); } .end { color: var(--red); }
-    canvas { display: block; width: 100%; height: min(72vh, 760px); min-height: 540px; background: #fff; }
-    .side { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    canvas { display: block; width: 100%; height: 100%; min-height: 0; flex: 1 1 auto; background: #fff; }
+    .side { height: 100%; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
     .section-title { margin: 8px 2px 2px; color: var(--soft); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
     .section-title:first-child { margin-top: 0; }
     .card { padding: 10px; border-radius: 7px; background: #fff; border: 1px solid var(--line); }
     .card.subtle { background: #fafafa; }
-    .card.compact { padding: 8px 10px; }
     .tool-card { display: grid; gap: 9px; }
-    .metric-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .metric { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; }
+    .metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .metric { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; }
     .metric .name { color: var(--muted); font-size: 11px; font-weight: 600; margin-bottom: 4px; }
-    .metric .state { font-size: 15px; font-weight: 650; line-height: 1.2; }
+    .metric .state { display: flex; align-items: center; gap: 7px; min-height: 22px; font-size: 15px; font-weight: 650; line-height: 1.2; overflow-wrap: anywhere; }
+    .metric.trigger-on { background: #111; border-color: #111; color: #fff; }
+    .metric.trigger-on .name { color: #ddd; }
     .next-action { border-left: 3px solid #111; padding: 8px 10px; background: #fff; font-weight: 600; line-height: 1.35; }
-    .command-box { margin: 0; border: 1px solid var(--line); border-radius: 6px; padding: 9px; background: #fff; color: var(--ink); font: 11px/1.45 "SF Mono", Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .label { color: var(--muted); font-size: 12px; font-weight: 600; margin-bottom: 6px; }
-    .value { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .large { font-size: 16px; font-weight: 600; font-family: inherit; }
-    .small { color: var(--muted); font-size: 12px; line-height: 1.45; }
-    .button-status { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .status-tile { border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fafafa; }
-    .status-tile .name { color: var(--muted); font-size: 11px; font-weight: 600; margin-bottom: 4px; }
-    .status-tile .state { font-size: 20px; line-height: 1.1; font-weight: 700; letter-spacing: -.02em; }
-    .status-tile.trigger-on { background: #111; border-color: #111; color: #fff; }
-    .status-tile.trigger-on .name { color: #ddd; }
-    .details { border: 1px solid var(--line); border-radius: 7px; background: #fff; overflow: hidden; }
-    .details summary { cursor: pointer; padding: 8px 10px; color: var(--muted); font-size: 12px; font-weight: 600; list-style-position: inside; }
-    .details[open] summary { border-bottom: 1px solid var(--line); color: var(--ink); background: #fafafa; }
-    .raw-grid { display: grid; gap: 6px; padding: 8px; }
-    .raw-grid .card { padding: 7px 8px; }
-    .raw-grid .label { margin-bottom: 3px; font-size: 11px; }
-    .raw-grid .value { font-size: 11px; line-height: 1.4; }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .profile-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; }
-    .profile-row.wide { grid-template-columns: 1fr; }
     input, select {
       width: 100%;
       border: 1px solid var(--line-strong);
@@ -124,43 +109,42 @@ HTML = r"""<!doctype html>
     button.primary:hover { background: #333; }
     button:disabled { color: #aaa; border-color: #e5e5e5; background: #fafafa; cursor: not-allowed; }
     button.full { grid-column: 1 / -1; }
-    .steps { display: grid; gap: 8px; }
-    .step { padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fafafa; color: var(--muted); }
-    .step.active { border-color: #111; color: #111; background: #fff; }
-    .step.done { color: #111; }
     .profile-hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
     @media (max-width: 980px) {
-      .wrap { width: min(100vw - 20px, 760px); margin: 10px auto; }
-      header, .layout { display: grid; grid-template-columns: 1fr; }
-      .status { align-items: flex-start; min-width: 0; }
+      body { height: auto; min-height: 100vh; padding: 10px; overflow: auto; }
+      .wrap { width: min(100%, 760px); margin: 0 auto; }
+      .wrap { height: auto; }
+      .layout { display: grid; grid-template-columns: 1fr; }
+      .stage, .side { height: auto; }
+      .side { overflow: visible; }
       canvas { min-height: 420px; height: 58vh; }
       .stage-head { align-items: flex-start; flex-direction: column; }
+      .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header>
-      <div>
-        <h1>Quest calibration console</h1>
-        <p class="subtitle">A setup tool for controller tracking and reusable source-frame calibration.</p>
-      </div>
-      <div class="status">
-        <span class="pill"><span id="dot" class="dot"></span><span id="gateText">connecting</span></span>
-        <div class="small" id="statusText">Waiting for server events...</div>
-      </div>
+      <h1>Quest Calibration</h1>
     </header>
 
     <div class="layout">
       <section class="stage">
         <div class="stage-head">
-          <div class="stage-title" id="stageTitle">Trajectory view</div>
-          <div class="legend">
-            <span class="swatch right">right +X</span>
-            <span class="swatch forward">forward +Y</span>
-            <span class="swatch up">up +Z</span>
-            <span class="swatch start">start</span>
-            <span class="swatch end">latest</span>
+          <div class="stage-info">
+            <div class="stage-title">Calibration View</div>
+            <div class="legend">
+              <span class="swatch right">right +X</span>
+              <span class="swatch forward">forward +Y</span>
+              <span class="swatch up">up +Z</span>
+              <span class="swatch start">start</span>
+              <span class="swatch end">latest</span>
+            </div>
+          </div>
+          <div class="stage-actions">
+            <button id="fit">Fit view</button>
+            <button id="clear">Clear path</button>
           </div>
         </div>
         <canvas id="canvas"></canvas>
@@ -170,7 +154,8 @@ HTML = r"""<!doctype html>
         <p class="section-title">Setup</p>
         <div class="card subtle tool-card">
           <div class="metric-row">
-            <div class="metric"><div class="name">Quest stream</div><div class="state" id="streamMetric">--</div></div>
+            <div class="metric"><div class="name">Quest stream</div><div class="state"><span id="dot" class="dot"></span><span id="streamMetric">--</span></div></div>
+            <div id="triggerMetric" class="metric"><div class="name">Trigger</div><div class="state" id="triggerValue">--</div></div>
             <div class="metric"><div class="name">Profile state</div><div class="state" id="profileMetric">Not loaded</div></div>
           </div>
           <div class="profile-row">
@@ -184,40 +169,11 @@ HTML = r"""<!doctype html>
           <div id="profileStatus" class="profile-hint" style="margin-top:8px;">Loading profiles...</div>
         </div>
 
-        <p class="section-title">Position Calibration</p>
-        <div class="steps">
-          <div id="stepRight" class="step active">1. Capture a start point, move the controller to your right, then save <b>right</b>.</div>
-          <div id="stepForward" class="step">2. Capture a start point, move forward, then save <b>forward</b>.</div>
-          <div id="stepOrigin" class="step">3. Hold the controller at the neutral teleop origin, then save <b>origin</b>.</div>
-        </div>
-        <div id="nextAction" class="next-action">Start Quest streaming, then capture right direction.</div>
+        <p class="section-title">Calibration</p>
+        <div id="nextAction" class="next-action">Start a new calibration.</div>
         <div class="actions">
-          <button id="calibNext" class="primary">Start right sample</button>
-          <button id="resetCalib">Restart calibration</button>
-          <button id="clear" class="full">Clear path</button>
+          <button id="calibNext" class="primary full">Start new calibration</button>
         </div>
-        <div id="calibCard" class="card subtle">
-          <div class="label">Frame status</div>
-          <div id="calibStatus" class="value">No calibration yet.</div>
-        </div>
-
-        <p class="section-title">Live data</p>
-        <div class="card compact"><div class="label">Samples / path</div><div id="samples" class="value large">0 / 0.000 m</div></div>
-        <div class="card compact"><div class="label">Controller</div><div id="buttons">--</div></div>
-        <details class="details">
-          <summary>Raw numbers</summary>
-          <div class="raw-grid">
-            <div class="card"><div class="label">Teleop position [right, forward, up]</div><div id="teleopPos" class="value">--</div></div>
-            <div class="card"><div class="label">Raw Quest position [x, y, z]</div><div id="rawPos" class="value">--</div></div>
-            <div class="card"><div class="label">Quaternion (xyzw)</div><div id="quat" class="value">--</div></div>
-            <div class="card"><div class="label">Stream</div><div id="stream" class="value">--</div></div>
-          </div>
-        </details>
-        <div class="actions">
-          <button id="fit">Fit view</button>
-          <button id="poseAxes">Show pose axes</button>
-        </div>
-        <div class="card subtle small">Drag to rotate. Wheel to zoom. Numeric teleop frame is [right, forward, up]. In the 3D view, forward is drawn into the scene (-Z) so right cross forward = up.</div>
       </aside>
     </div>
   </div>
@@ -227,43 +183,26 @@ const CALIBRATION_VERSION = 5;
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const dot = document.getElementById('dot');
-const gateText = document.getElementById('gateText');
-const statusText = document.getElementById('statusText');
-const stageTitle = document.getElementById('stageTitle');
 const streamMetric = document.getElementById('streamMetric');
+const triggerMetric = document.getElementById('triggerMetric');
+const triggerValueEl = document.getElementById('triggerValue');
 const profileMetric = document.getElementById('profileMetric');
 const nextActionEl = document.getElementById('nextAction');
-const samplesEl = document.getElementById('samples');
-const teleopPosEl = document.getElementById('teleopPos');
-const buttonsEl = document.getElementById('buttons');
-const rawPosEl = document.getElementById('rawPos');
-const quatEl = document.getElementById('quat');
-const streamEl = document.getElementById('stream');
-const calibStatus = document.getElementById('calibStatus');
-const stepOrigin = document.getElementById('stepOrigin');
-const stepRight = document.getElementById('stepRight');
-const stepForward = document.getElementById('stepForward');
 const calibNextBtn = document.getElementById('calibNext');
 const profileSelect = document.getElementById('profileSelect');
 const profileNameInput = document.getElementById('profileName');
 const loadProfileBtn = document.getElementById('loadProfile');
 const saveProfileBtn = document.getElementById('saveProfile');
 const profileStatus = document.getElementById('profileStatus');
-const poseAxesBtn = document.getElementById('poseAxes');
 let rawPoints = [];
 let points = [];
 let latestRaw = null;
 let latest = null;
 let gateOpen = false;
 let pauseState = null;
-let resolutionState = null;
-let gripperState = null;
-let gripperCount = 0;
-let lastMessage = null;
 let az = 0.72;
 let el = 0.42;
 let zoom = 1.0;
-let showPoseAxes = false;
 let dragging = false;
 let dragStart = null;
 const QUEST_UP = {x:0, y:1, z:0};
@@ -319,19 +258,17 @@ function profileStateText() {
   return 'Ready';
 }
 function nextCalibrationAction() {
-  if (!latestRaw && !isCalibrated()) return 'Start Quest streaming. Press B until Stream shows High, then begin calibration.';
-  if (!hasRightStart()) return 'Capture a start point for the right-direction sample.';
-  if (!hasRight()) return 'Move the controller to your physical right, hold still, then save right.';
-  if (!hasForwardStart()) return 'Capture a start point for the forward-direction sample.';
-  if (!hasForward()) return 'Move the controller forward, hold still, then save forward.';
-  if (!hasOrigin()) return 'Hold the controller at the neutral teleop origin, then save origin.';
-  return 'Profile is ready for teleoperation.';
+  if (!calibration || isCalibrated()) return 'Start a new calibration.';
+  if (!latestRaw) return 'Start Quest streaming. Press B until Quest stream shows Streaming.';
+  if (!hasRightStart()) return 'Hold the controller at a comfortable start pose, then start collecting right.';
+  if (!hasRight()) return 'Move the controller to your physical right, hold still, then finish right.';
+  if (!hasForwardStart()) return 'Hold the controller at a comfortable start pose, then start collecting forward.';
+  if (!hasForward()) return 'Move the controller forward, hold still, then finish forward.';
+  return 'Hold the controller at the neutral teleop pose, then set origin.';
 }
 function updateToolSummary() {
   streamMetric.textContent = gateOpen ? 'Streaming' : (pauseState ? `Paused (${pauseState})` : 'Waiting');
   profileMetric.textContent = profileStateText();
-  nextActionEl.textContent = nextCalibrationAction();
-  stageTitle.textContent = 'Trajectory calibration view';
 }
 function saveServerCalibration() {
   if (!isCalibrated()) {
@@ -374,22 +311,6 @@ function rawToDisplay(p) {
   out.teleop = vec(right, forward, up);
   return out;
 }
-function directionToDisplay(dir) {
-  if (!isCalibrated()) return vec(dir.x, dir.y, -dir.z);
-  return vec(dot3(dir, calibration.right), dot3(dir, calibration.up), -dot3(dir, calibration.forward));
-}
-function quatMatrixColumns(p) {
-  let qx = Number(p.qx), qy = Number(p.qy), qz = Number(p.qz), qw = Number(p.qw);
-  const n = Math.hypot(qx, qy, qz, qw);
-  if (!Number.isFinite(n) || n <= 1e-9) return null;
-  qx /= n; qy /= n; qz /= n; qw /= n;
-  const xx=qx*qx, yy=qy*qy, zz=qz*qz, xy=qx*qy, xz=qx*qz, yz=qy*qz, wx=qw*qx, wy=qw*qy, wz=qw*qz;
-  return [
-    vec(1 - 2*(yy + zz), 2*(xy + wz), 2*(xz - wy)),
-    vec(2*(xy - wz), 1 - 2*(xx + zz), 2*(yz + wx)),
-    vec(2*(xz + wy), 2*(yz - wx), 1 - 2*(xx + yy))
-  ];
-}
 function currentRightMotion() {
   if (!hasRightStart() || !latestRaw) return null;
   const rawDelta = sub(rawVec(latestRaw), calibration.rightStart);
@@ -409,6 +330,7 @@ function refreshDisplayPoints() {
   latest = points.length ? points[points.length - 1] : null;
 }
 function resize() {
+  if (window.innerWidth > 980 && window.scrollY !== 0) window.scrollTo(0, 0);
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.max(1, Math.floor(rect.width * dpr));
@@ -417,8 +339,6 @@ function resize() {
   draw();
 }
 window.addEventListener('resize', resize);
-function distance(a, b) { return Math.hypot(b.x-a.x, b.y-a.y, b.z-a.z); }
-function pathLength() { let total = 0; for (let i = 1; i < points.length; i++) total += distance(points[i-1], points[i]); return total; }
 function bounds() {
   const extras = [{x:0,y:0,z:0}];
   const all = points.concat(extras);
@@ -444,14 +364,6 @@ function line3(a, bpt, b, color, width=1, alpha=1) {
   const A = project(a, b), B = project(bpt, b);
   ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(A.u, A.v); ctx.lineTo(B.u, B.v); ctx.stroke(); ctx.restore();
 }
-function quatAxes(p) {
-  const cols = quatMatrixColumns(p); if (!cols) return null;
-  return [
-    {label:'X', color:'#d44c47', dir:directionToDisplay(cols[0])},
-    {label:'Y', color:'#448361', dir:directionToDisplay(cols[1])},
-    {label:'Z', color:'#337ea9', dir:directionToDisplay(cols[2])}
-  ];
-}
 function drawArrow3(origin, dir, b, color, axisLen, width, alpha, label) {
   const end = add(origin, mul(normalize(dir), axisLen));
   const A = project(origin, b), B = project(end, b);
@@ -467,11 +379,6 @@ function drawArrow3(origin, dir, b, color, axisLen, width, alpha, label) {
   }
   if (label) { ctx.font = '12px SF Mono, Menlo, monospace'; ctx.fillText(label, B.u + 6, B.v - 4); }
   ctx.restore();
-}
-function drawPoseAxes(p, b, emphasis=false) {
-  const axes = quatAxes(p); if (!axes) return;
-  const axisLen = Math.max(0.035, Math.min(0.22, b.span * (emphasis ? 0.14 : 0.08)));
-  for (const axis of axes) drawArrow3(p, axis.dir, b, axis.color, axisLen, emphasis ? 3.0 : 1.3, emphasis ? 0.9 : 0.20, emphasis ? axis.label : null);
 }
 function drawGrid(b) {
   for (let i=0; i<=8; i++) {
@@ -505,15 +412,10 @@ function draw() {
       ctx.beginPath(); ctx.moveTo(A.u,A.v); ctx.lineTo(B.u,B.v); ctx.stroke();
     }
   }
-  if (showPoseAxes && points.length) {
-    const stride = Math.max(1, Math.floor(points.length / 16));
-    for (let i=0; i<points.length-1; i+=stride) drawPoseAxes(points[i], b, false);
-  }
   if (points.length) {
     const S = project(points[0], b), E = project(points[points.length-1], b);
     ctx.fillStyle = '#448361'; ctx.beginPath(); ctx.arc(S.u,S.v,5,0,Math.PI*2); ctx.fill();
     ctx.fillStyle = '#d44c47'; ctx.beginPath(); ctx.arc(E.u,E.v,6,0,Math.PI*2); ctx.fill();
-    if (showPoseAxes) drawPoseAxes(points[points.length-1], b, true);
   }
 }
 function updateCalibrationStatus(message=null) {
@@ -521,87 +423,60 @@ function updateCalibrationStatus(message=null) {
   const forwardMotion = currentForwardMotion();
   const rightMotionText = rightMotion ? `${fmt(rightMotion.length,3)} m horizontal movement` : '--';
   const forwardMotionText = forwardMotion ? `${fmt(forwardMotion.length,3)} m forward movement` : '--';
-  stepRight.classList.toggle('done', hasRight());
-  stepRight.classList.toggle('active', !hasRight());
-  stepForward.classList.toggle('done', hasForward());
-  stepForward.classList.toggle('active', hasRight() && !hasForward());
-  stepOrigin.classList.toggle('done', isCalibrated());
-  stepOrigin.classList.toggle('active', hasForward() && !hasOrigin());
   saveProfileBtn.disabled = !isCalibrated();
-  calibNextBtn.disabled = !latestRaw && !isCalibrated();
-  if (!hasRightStart()) calibNextBtn.textContent = 'Start right sample';
-  else if (!hasRight()) calibNextBtn.textContent = 'Save right';
-  else if (!hasForwardStart()) calibNextBtn.textContent = 'Start forward sample';
-  else if (!hasForward()) calibNextBtn.textContent = 'Save forward';
-  else if (!hasOrigin()) calibNextBtn.textContent = 'Save origin';
-  else calibNextBtn.textContent = 'Start new calibration';
-  if (message) { calibStatus.textContent = message; return; }
-  if (isCalibrated()) {
-    calibStatus.textContent = `Ready: ${currentProfile}\nright=[${fmt(calibration.right.x,3)}, ${fmt(calibration.right.y,3)}, ${fmt(calibration.right.z,3)}]\nforward=[${fmt(calibration.forward.x,3)}, ${fmt(calibration.forward.y,3)}, ${fmt(calibration.forward.z,3)}]\norigin=[${fmt(calibration.origin.x,3)}, ${fmt(calibration.origin.y,3)}, ${fmt(calibration.origin.z,3)}]`;
-  } else if (hasForward()) {
-    calibStatus.textContent = 'Right and forward are set. Hold the controller at the neutral teleop origin and click Save origin.';
-  } else if (hasForwardStart()) {
-    calibStatus.textContent = `Move forward and hold.\nCurrent ${forwardMotionText}\nNeed at least ${fmt(MIN_RIGHT_M,2)} m.`;
-  } else if (hasRight()) {
-    calibStatus.textContent = 'Right saved. Click Start forward sample from any comfortable point, then move forward.';
-  } else if (hasRightStart()) {
-    calibStatus.textContent = `Move to your right and hold.\nCurrent ${rightMotionText}\nNeed at least ${fmt(MIN_RIGHT_M,2)} m.`;
-  } else {
-    calibStatus.textContent = latestRaw ? 'Click Start right sample, move right, then Save right.' : 'Start Quest streaming first, then calibrate.';
-  }
+  calibNextBtn.disabled = !!calibration && !isCalibrated() && !latestRaw;
+  if (!calibration || isCalibrated()) calibNextBtn.textContent = 'Start new calibration';
+  else if (!hasRightStart()) calibNextBtn.textContent = 'Start collecting right';
+  else if (!hasRight()) calibNextBtn.textContent = 'Finish right';
+  else if (!hasForwardStart()) calibNextBtn.textContent = 'Start collecting forward';
+  else if (!hasForward()) calibNextBtn.textContent = 'Finish forward';
+  else calibNextBtn.textContent = 'Set origin';
+  if (message) nextActionEl.textContent = message;
+  else if (hasForwardStart() && !hasForward()) nextActionEl.textContent = `${nextCalibrationAction()} Current movement: ${forwardMotionText}.`;
+  else if (hasRightStart() && !hasRight()) nextActionEl.textContent = `${nextCalibrationAction()} Current movement: ${rightMotionText}.`;
+  else nextActionEl.textContent = nextCalibrationAction();
 }
 function updateStats() {
   dot.classList.toggle('on', gateOpen);
-  gateText.textContent = gateOpen ? 'streaming' : 'paused';
-  statusText.textContent = `stream=${pauseState ?? '--'} / last=${lastMessage ?? '--'}`;
-  samplesEl.textContent = `${points.length} / ${pathLength().toFixed(3)} m`;
   const triggerValue = latestRaw ? (latestRaw.flag ? 'True' : 'False') : '--';
-  const triggerClass = latestRaw && latestRaw.flag ? 'trigger-on' : 'trigger-off';
-  buttonsEl.innerHTML = `<div class="button-status">
-    <div class="status-tile"><div class="name">Stream</div><div class="state">${pauseState ?? '--'}</div></div>
-    <div class="status-tile ${triggerClass}"><div class="name">Trigger</div><div class="state">${triggerValue}</div></div>
-  </div>`;
-  if (latest && latestRaw) {
-    teleopPosEl.textContent = `right=${fmt(latest.teleop.x)}\nforward=${fmt(latest.teleop.y)}\nup=${fmt(latest.teleop.z)}`;
-    rawPosEl.textContent = `x=${fmt(latestRaw.x)}\ny=${fmt(latestRaw.y)}\nz=${fmt(latestRaw.z)}`;
-    const qNorm = Math.hypot(Number(latestRaw.qx), Number(latestRaw.qy), Number(latestRaw.qz), Number(latestRaw.qw));
-    quatEl.textContent = `x=${fmt(latestRaw.qx)}\ny=${fmt(latestRaw.qy)}\nz=${fmt(latestRaw.qz)}\nw=${fmt(latestRaw.qw)}\n|q|=${fmt(qNorm, 5)}`;
-    streamEl.textContent = `seq=${latestRaw.seq}\nkind=${latestRaw.kind}\nrecv=${latestRaw.recv_iso}`;
-  } else {
-    teleopPosEl.textContent = '--'; rawPosEl.textContent = '--'; quatEl.textContent = '--'; streamEl.textContent = '--';
-  }
+  triggerValueEl.textContent = triggerValue;
+  triggerMetric.classList.toggle('trigger-on', !!latestRaw && !!latestRaw.flag);
   updateCalibrationStatus();
   updateToolSummary();
 }
 function handleEvent(ev) {
   if (ev.type === 'snapshot') {
     rawPoints = (ev.points || []).map(clonePoint);
-    gateOpen = !!ev.gate_open; pauseState = ev.pause_state; resolutionState = ev.resolution_state;
-    gripperState = ev.gripper_state; gripperCount = ev.gripper_count || 0;
+    gateOpen = !!ev.gate_open; pauseState = ev.pause_state;
   } else if (ev.type === 'reset') {
     rawPoints = [];
   } else if (ev.type === 'pose') {
     rawPoints.push(clonePoint(ev.point));
   } else if (ev.type === 'status') {
-    gateOpen = !!ev.gate_open; pauseState = ev.pause_state; resolutionState = ev.resolution_state;
-    gripperState = ev.gripper_state; gripperCount = ev.gripper_count || gripperCount;
+    gateOpen = !!ev.gate_open; pauseState = ev.pause_state;
   }
-  lastMessage = ev.recv_iso || new Date().toLocaleTimeString();
   refreshDisplayPoints(); updateStats(); draw();
 }
 function requireLatest() {
   if (!latestRaw) { updateCalibrationStatus('No controller sample yet. Start streaming first.'); return null; }
   return rawVec(latestRaw);
 }
-function beginCalibration() {
+function beginNewCalibration() {
   currentProfile = sanitizeProfileName(profileNameInput.value);
+  calibration = {version:CALIBRATION_VERSION, profile:currentProfile, up:QUEST_UP, state:'new', createdAt:new Date().toISOString()};
+  rawPoints = [];
+  localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
+}
+function startRightCollection() {
   const p = requireLatest(); if (!p) return;
-  calibration = {version:CALIBRATION_VERSION, profile:currentProfile, rightStart:p, up:QUEST_UP, state:'right_started', createdAt:new Date().toISOString()};
+  if (!calibration || isCalibrated()) { updateCalibrationStatus('Start a new calibration first.'); return; }
+  calibration.rightStart = p;
+  calibration.state = 'right_started';
   localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
 }
 function saveRightDirection() {
   const p = requireLatest(); if (!p) return;
-  if (!hasRightStart()) { updateCalibrationStatus('Click Start right sample first.'); return; }
+  if (!hasRightStart()) { updateCalibrationStatus('Start collecting right first.'); return; }
   const rawDelta = sub(p, calibration.rightStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const length = norm(horizontal);
@@ -620,7 +495,7 @@ function startForwardSample() {
 }
 function saveForwardDirection() {
   const p = requireLatest(); if (!p) return;
-  if (!hasRight() || !hasForwardStart()) { updateCalibrationStatus('Click Start forward sample first.'); return; }
+  if (!hasRight() || !hasForwardStart()) { updateCalibrationStatus('Start collecting forward first.'); return; }
   const rawDelta = sub(p, calibration.forwardStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const orthogonal = sub(horizontal, mul(calibration.right, dot3(horizontal, calibration.right)));
@@ -644,21 +519,15 @@ function saveOrigin() {
   saveServerCalibration();
 }
 calibNextBtn.onclick = () => {
-  if (isCalibrated()) { calibration = null; beginCalibration(); return; }
-  if (!hasRightStart()) beginCalibration();
+  if (!calibration || isCalibrated()) beginNewCalibration();
+  else if (!hasRightStart()) startRightCollection();
   else if (!hasRight()) saveRightDirection();
   else if (!hasForwardStart()) startForwardSample();
   else if (!hasForward()) saveForwardDirection();
   else if (!hasOrigin()) saveOrigin();
 };
-document.getElementById('resetCalib').onclick = () => {
-  calibration = null;
-  localStorage.removeItem(profileKey());
-  refreshDisplayPoints(); updateStats(); draw();
-};
 document.getElementById('clear').onclick = () => { rawPoints = []; refreshDisplayPoints(); updateStats(); draw(); };
 document.getElementById('fit').onclick = () => { zoom = 1; draw(); };
-poseAxesBtn.onclick = () => { showPoseAxes = !showPoseAxes; poseAxesBtn.textContent = showPoseAxes ? 'Hide pose axes' : 'Show pose axes'; draw(); };
 profileNameInput.addEventListener('change', () => {
   currentProfile = sanitizeProfileName(profileNameInput.value);
   profileNameInput.value = currentProfile;
@@ -729,7 +598,7 @@ loadProfiles().then(() => loadServerCalibration(currentProfile));
 fetch('/snapshot').then(r => r.json()).then(handleEvent).catch(() => {});
 const es = new EventSource('/events');
 es.onmessage = e => handleEvent(JSON.parse(e.data));
-es.onerror = () => { gateText.textContent = 'disconnected'; dot.classList.remove('on'); };
+es.onerror = () => { streamMetric.textContent = 'Disconnected'; dot.classList.remove('on'); };
 updateCalibrationStatus(); resize(); setInterval(draw, 1000);
 </script>
 </body>

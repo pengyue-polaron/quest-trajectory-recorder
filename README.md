@@ -45,11 +45,13 @@ ports as soon as USB debugging becomes available. A later USB reconnect repairs
 the link again without restarting an active app. `just status` remains
 `DEGRADED` until the device and FrankaBot are ready, while the page stays usable.
 
-`just adb-prepare` repairs ADB reverse mappings and brings FrankaBot forward
-without restarting it. `just adb-focus` is the next recovery step if a Meta
-panel stole focus. `just adb-restart` is deliberately explicit and should be
-used only when the app itself is wedged. The session health monitor never
-restarts the Quest app in the middle of an operation.
+`just adb-prepare` is the one-shot Quest readiness command: it waits for an
+authorized device, wakes it, enables stay-awake power policy, repairs every ADB
+reverse mapping, closes launch-blocking Meta panels, softly focuses FrankaBot,
+and verifies XR foreground without restarting the app. `just adb-focus` is the
+smaller recovery step if a Meta panel later steals focus. `just adb-restart` is
+deliberately explicit and should be used only when the app itself is wedged.
+The session health monitor never restarts the Quest app mid-operation.
 
 ## Supported Quest Application
 

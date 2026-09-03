@@ -84,8 +84,9 @@ focus fails, because it explicitly starts a fresh Unity activity.
 For unattended diagnosis, `just status-json` reports the whole managed task;
 `just adb-status-json` returns the lower-level `quest.adb_status/v1` device
 object and a non-zero exit code unless USB, FrankaBot focus, and all reverse
-ports are ready. `just adb-prepare` is safe to retry: it repairs mappings and
-focuses an inactive app without restarting an active one.
+ports are ready. `just adb-prepare` is the complete, safe-to-retry preparation:
+wait for authorized ADB, wake Quest, apply stay-awake power policy, repair every
+mapping, soft-focus FrankaBot, and verify XR foreground without restarting it.
 
 Do wear the headset while controlling. Meta can leave ADB and the controller
 radio connected while marking the controller `CONNECTED_INACTIVE`; in that
