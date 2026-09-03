@@ -48,39 +48,36 @@ def test_calibration_ui_has_one_sequential_workflow_without_debug_sections() -> 
     assert "overflow-y: auto" in page
 
 
-def test_session_launcher_uses_protocol_probe_and_child_liveness() -> None:
-    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
-        encoding="utf-8"
-    )
+def test_quest_checkout_has_no_downstream_runtime() -> None:
+    root = Path(__file__).resolve().parents[1]
 
-    assert "quest_trajectory_recorder.foxglove_probe" in launcher
-    assert 'kill -0 "$FOXGLOVE_PID"' in launcher
-    assert "socket.create_connection" not in launcher
+    assert not (root / "scripts" / "run_quest_session.sh").exists()
+    package = root / "src" / "quest_trajectory_recorder"
+    for removed in (
+        "session_cli.py",
+        "backend_session.py",
+        "teleop_stack.py",
+        "foxglove_bridge.py",
+        "foxglove_probe.py",
+        "foxglove_publish.py",
+        "managed_session.py",
+    ):
+        assert not (package / removed).exists()
 
-
-def test_session_launcher_appends_common_args_without_expanding_an_empty_array() -> None:
-    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
-        encoding="utf-8"
-    )
-
-    assert "BACKEND_ARGS+=(" in launcher
-    assert '  "${BACKEND_ARGS[@]}"\n)' not in launcher
-
-
-def test_forcevla_session_starts_with_closed_gripper() -> None:
-    launcher = (Path(__file__).resolve().parents[1] / "scripts" / "run_quest_session.sh").read_text(
-        encoding="utf-8"
-    )
-
-    assert 'if [[ "$BACKEND" == "mujoco" ]]; then\n  INITIAL_GRIPPER="closed"' in launcher
-    assert '--initial-gripper "$INITIAL_GRIPPER"' in launcher
+    source_text = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(package.glob("*.py"))
+    ).lower()
+    assert "forcevla" not in source_text
+    assert "maniskill" not in source_text
+    assert "foxglove" not in source_text
 
 
-def test_justfile_exposes_one_agent_lifecycle_for_calibration_and_backends() -> None:
+def test_justfile_exposes_only_quest_owned_lifecycle() -> None:
     justfile = (Path(__file__).resolve().parents[1] / "Justfile").read_text(encoding="utf-8")
 
-    assert "session_cli start calibration" in justfile
-    assert "session_cli start forcevla" in justfile
-    assert "session_cli start maniskill" in justfile
-    assert "session_cli stop" in justfile
-    assert "session_cli status --json" in justfile
+    assert "calibration_cli start" in justfile
+    assert "source_cli" in justfile
+    assert "forcevla" not in justfile.lower()
+    assert "maniskill" not in justfile.lower()
+    assert "calibration_cli stop" in justfile
+    assert "calibration_cli status --json" in justfile

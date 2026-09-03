@@ -1,103 +1,54 @@
 # Repository architecture
 
-This repository is the Quest input-device and session-composition layer. It
-does not implement ManiSkill or MuJoCo control policy.
+## Owned here
 
-## Maintained runtime
+- Quest APK/ADB readiness and raw reverse ports;
+- raw frame parsing and optional raw capture;
+- Quest-coordinate calibration and named profile storage;
+- adaptation to canonical `TeleopTarget` and `TeleopSourceStatus`;
+- one latest-value ZMQ publisher;
+- a synthetic source for source/consumer contract tests.
+
+## Explicitly not owned here
+
+- simulator or robot imports;
+- controller-to-native-action mapping, gains, safety limits, or workspace;
+- backend feedback, task state, cameras, recording, or episode manifests;
+- Foxglove gateway, layout, buttons, or command routing;
+- complete-session process supervision.
+
+The repository must not contain a backend name, sibling repository path, opaque
+backend command, feedback subscriber, or backend lifecycle mode. A consumer
+depends on the canonical `embodied-ops` contract and subscribes to ZMQ; the
+Quest publisher has no reference to that consumer.
 
 ```text
-raw Quest APK ports
-  -> calibration browser on HTTP 8766 (pre-collection only)
-  -> Quest parser + named calibration
-  -> embodied.teleop_target/v1 on ZMQ 8130
-  -> shared clutch/guard + backend-owned native action/camera/task record fields
-  -> embodied.teleop_feedback/v1 on ZMQ 8131
-  -> Foxglove gateway on WebSocket 8765
-
-Foxglove service
-  -> embodied.teleop_command/v1 on ZMQ 8132
-  -> backend validation/application
-  -> embodied.teleop_command_result/v1
-  -> Foxglove service response
+                embodied-ops canonical contracts
+                    /                       \
+Quest source -> TeleopTarget PUB          backend SUB -> native action
+                    \                       /
+              backend-owned session composition
 ```
 
-The calibration browser is source-owned, listens on HTTP 8766 by default, and
-exists only before collection. Port 8765 is reserved for Foxglove WebSocket.
-Foxglove is the sole collection UI. The removed Dashboard and Quest Operator
-Panels are not alternate production paths.
+## Modules
 
-## Module ownership
-
-| Module | Role |
+| Module | Ownership |
 | --- | --- |
-| `receiver.py` | Raw APK text parser and raw CSV capture. |
-| `quest_ports.py`, `device_cli.py` | Quest port constants plus explicit, scriptable ADB status, reverse-port, focus, and restart operations. |
-| `calibration_profiles.py`, `teleop_frame.py` | Named profile validation and Quest-to-teleop geometry. |
-| `teleop_target.py` | Raw Quest frame to canonical `TeleopTarget`. |
-| `quest_target_source.py` | Raw Quest socket ownership and controller gate/gripper state. |
-| `quest_tracker_hub.py` | Canonical target/status ZMQ publisher. |
-| `synthetic_target.py` | Deterministic canonical source for tests. |
-| `device_doctor.py` | Read-only ADB/APK/port/calibration readiness. |
-| `foxglove_bridge.py` | Canonical ZMQ observer/command client mapped to Foxglove images, native diagnostics, poses, and services. |
-| `foxglove/quest-teleop-controls` | Compact React panel that calls the acknowledged Foxglove services. |
-| `foxglove_publish.py` | CI publisher for the versioned `.foxe` and organization layout. |
-| `live3d.py`, `live3d_web.py` | Quest-only calibration UI and profile writer. |
-
-Shared schemas, geometry, transport, source status, commands, recording
-primitives, and Cartesian clutch mapping are imported directly from
-`embodied_ops.teleop`. This repository
-contains no compatibility re-export and does not accept Quest-prefixed target
-schemas.
-
-## Repository dependency direction
-
-```text
-embodied-ops canonical contracts + ZMQ
-  <- Quest source/session composition
-  <- RobotTeamBench ManiSkill backend
-  <- ForceVLA MuJoCo backend
-```
-
-Neither backend imports this repository. The source owns APK parsing and
-calibration. The shared package owns clutch/freshness/workspace mechanisms,
-recording schemas, and command vocabulary; each backend chooses the safety
-thresholds and workspace policy and owns task resets, native actions, cameras,
-task diagnostics, and only acknowledges a command after its effect is complete.
-
-## Primary commands
-
-```bash
-just calibrate <profile>
-just stop
-# Choose one backend:
-just maniskill <profile> cube_sort --record
-# just forcevla <profile> --record
-just status-json
-just stop
-```
-
-`session_cli` is the Agent lifecycle boundary. It allows exactly one managed
-calibration or teleoperation task, persists its PID and log outside the
-repository, waits for protocol-level readiness, exposes JSON health, and stops
-idempotently. `run_quest_session.sh` remains the single teleoperation
-composition root beneath it: one target source, one backend, and one Foxglove
-gateway, with complete child-set cleanup. Low-level component scripts remain
-for diagnosis and focused tests; see `scripts/README.md`.
-
-ADB lifecycle is asymmetric by design: background health monitoring may repair
-reverse ports and publish state, but only an explicit operator/Agent command
-may focus or restart the Quest activity. This prevents a transient ADB probe or
-Meta focus change from resetting the controller stream mid-motion.
+| `quest_ports.py`, `device_cli.py` | Quest/ADB readiness and explicit focus/restart operations. |
+| `receiver.py`, `live_state.py` | Raw APK parsing and live source state. |
+| `calibration_profiles.py`, `profile_cli.py` | User-level profile validation, lookup, and migration. |
+| `live3d.py`, `live3d_web.py`, `calibration_cli.py` | Quest-only calibration page and lifecycle. |
+| `teleop_frame.py`, `teleop_target.py` | Quest frame conversion into canonical values. |
+| `quest_target_source.py`, `quest_tracker_hub.py`, `source_cli.py` | Raw socket ownership and target/status publication. |
+| `synthetic_target.py` | Deterministic canonical publisher for integration tests. |
 
 ## Extension rules
 
-- New input devices publish the canonical `TeleopTarget`; they do not add
-  source-specific fields to the top-level schema.
-- New backends import `embodied_ops.teleop` directly and never bind Quest raw
-  ports.
-- New collection controls become idempotent ZMQ commands acknowledged by the
-  backend before Foxglove reports success.
-- Device calibration stays with the source; task/workspace calibration stays
-  with the backend.
-- A second UI or second control transport requires an explicit operational
-  need; it is not added as a convenience fallback.
+- A new input device gets its own adapter and publishes the same canonical
+  contract; it does not add source-specific top-level fields.
+- Device calibration stays with the source. Task/workspace calibration and
+  action safety stay with the backend.
+- A background ADB health check may repair reverse ports but may never restart
+  FrankaBot mid-operation.
+- Downstream tools may inspect source metadata, but the source never imports or
+  calls downstream code.

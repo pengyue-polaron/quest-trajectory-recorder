@@ -1,14 +1,28 @@
-"""Calibration profile file helpers shared by the web UI and teleop scripts."""
+"""Calibration profile storage shared by the UI and installed Quest tools."""
 
 from __future__ import annotations
 
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
 
-DEFAULT_CALIBRATION_PATH = Path("calibrations/quest_teleop_frame.json")
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+LEGACY_CALIBRATION_DIR = PACKAGE_ROOT / "calibrations"
 PROFILE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def calibration_dir() -> Path:
+    """Return the user-owned profile directory, independent of any checkout."""
+
+    configured = os.environ.get("QUEST_CALIBRATION_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path.home() / ".config" / "quest-trajectory-recorder" / "calibrations"
+
+
+DEFAULT_CALIBRATION_PATH = calibration_dir() / "quest_teleop_frame.json"
 
 
 def sanitize_profile(raw: str | None, default: str) -> str:
@@ -21,6 +35,37 @@ def sanitize_profile(raw: str | None, default: str) -> str:
 
 def calibration_file(calibration_dir: Path, profile: str) -> Path:
     return calibration_dir / f"{profile}.json"
+
+
+def profile_path(
+    raw_profile: str,
+    *,
+    must_exist: bool = False,
+    legacy_dir: Path | None = LEGACY_CALIBRATION_DIR,
+) -> Path:
+    """Resolve a named profile without exposing a repository path to consumers.
+
+    New profiles live in the user configuration directory. A legacy checkout is
+    read only as a compatibility source so existing local calibrations continue
+    to work while they are migrated.
+    """
+
+    profile = sanitize_profile(raw_profile, "quest_teleop_frame")
+    preferred = calibration_file(calibration_dir(), profile)
+    candidates = [preferred]
+    if legacy_dir is not None:
+        legacy = calibration_file(legacy_dir, profile)
+        if legacy != preferred:
+            candidates.append(legacy)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    if must_exist:
+        checked = ", ".join(str(candidate) for candidate in candidates)
+        raise FileNotFoundError(
+            f"calibration profile {profile!r} was not found (checked {checked})"
+        )
+    return preferred
 
 
 def calibration_complete(data: Any) -> bool:

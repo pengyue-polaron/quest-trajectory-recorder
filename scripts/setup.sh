@@ -4,11 +4,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 if command -v uv >/dev/null 2>&1; then
   [[ -x .venv/bin/python ]] || uv venv --python 3.11 .venv
-  uv pip install --python .venv/bin/python -e '.[dev,foxglove]' ruff
+  uv pip install --python .venv/bin/python -e '.[dev]' ruff
 else
   python3 -m venv .venv
   .venv/bin/python -m pip install --upgrade pip
-  .venv/bin/python -m pip install -e '.[dev,foxglove]' ruff
+  .venv/bin/python -m pip install -e '.[dev]' ruff
 fi
 if [[ -n "${EMBODIED_OPS_ROOT:-}" ]]; then
   if [[ ! -f "${EMBODIED_OPS_ROOT}/pyproject.toml" ]]; then

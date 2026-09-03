@@ -6,6 +6,7 @@ from quest_trajectory_recorder.calibration_profiles import (
     calibration_complete,
     calibration_file,
     calibration_health,
+    profile_path,
     sanitize_profile,
 )
 
@@ -53,3 +54,17 @@ def test_left_handed_quest_position_frame_is_valid():
     assert health["valid"] is True
     assert health["determinant"] == pytest.approx(-1.0)
     assert health["handedness"] == "left"
+
+
+def test_profile_path_prefers_user_storage_and_falls_back_to_legacy(monkeypatch, tmp_path):
+    user_dir = tmp_path / "user"
+    legacy_dir = tmp_path / "legacy"
+    monkeypatch.setenv("QUEST_CALIBRATION_DIR", str(user_dir))
+    legacy_dir.mkdir()
+    (legacy_dir / "lab.json").write_text("{}")
+
+    assert profile_path("lab", must_exist=True, legacy_dir=legacy_dir) == legacy_dir / "lab.json"
+
+    user_dir.mkdir()
+    (user_dir / "lab.json").write_text("{}")
+    assert profile_path("lab", must_exist=True, legacy_dir=legacy_dir) == user_dir / "lab.json"

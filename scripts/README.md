@@ -4,19 +4,14 @@ Run `just` from the repository root for the supported human/Agent command
 surface. Scripts in this directory are the implementation layer behind those
 recipes and remain directly callable for debugging.
 
-The public `calibrate`, `forcevla`, and `maniskill` recipes are managed by
-`quest_trajectory_recorder.session_cli`. They return only after readiness and
-are paired with `just status`, `just status-json`, `just logs`, and the
-idempotent `just stop`. Runtime PID/state/log files live under the operating
-system temporary directory, never in a repository checkout.
+The public Quest recipes are `just calibrate <profile>` and foreground
+`just source <profile>`. Complete collection is started and supervised from the
+selected backend repository with its `just teleop ...` recipe.
 
 ## Primary workflow
 
-- `run_quest_session.sh`: the only maintained ManiSkill/MuJoCo collection
-  launcher. It waits for Quest ADB, owns source/backend/Foxglove, restores the
-  Quest stream after reconnects, and cleans up the whole process group.
 - `run_calibration.sh`: open the Quest-only calibration page on HTTP 8766 and
-  save a named profile before physical collection.
+  save a named profile in user configuration storage before physical collection.
 
 ## Device and environment
 
@@ -31,10 +26,9 @@ Prefer `just adb-status`, `just adb-prepare`, and `just adb-focus` for recovery.
 `just adb-restart` is the only routine command that intentionally restarts the
 running Quest app.
 
-## Low-level components
+## Low-level source components
 
 - `run_quest_tracker_hub.sh`: raw Quest ports to canonical ZMQ target stream.
-- `run_foxglove_bridge.sh`: canonical ZMQ streams to Foxglove WebSocket 8765.
 - `run_live3d.sh`: calibration server used by `run_calibration.sh` (HTTP 8766
   by default).
 
@@ -42,6 +36,6 @@ running Quest app.
 
 - `record_once.sh`, `run_receiver.sh`: raw APK capture.
 
-Collection scripts removed from the maintained surface: the MJPEG dashboard,
-backend Operator Panels, stdin teleop commands, and the old multi-UI stack
-launcher.
+Collection scripts removed from the maintained surface: the backend-selecting
+Quest launcher, MJPEG dashboard, backend Operator Panels, stdin teleop commands,
+Foxglove gateway, and old multi-UI stack launcher.

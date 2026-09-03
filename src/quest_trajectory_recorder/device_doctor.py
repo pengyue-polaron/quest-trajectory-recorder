@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .calibration_profiles import DEFAULT_CALIBRATION_PATH, calibration_health
-from .quest_ports import QUEST_PACKAGE
+from .quest_ports import QUEST_PACKAGE, quest_activity_resumed
 
 REQUIRED_REVERSE_PORTS = (8095, 8100, 8125, 8127)
 
@@ -86,9 +86,7 @@ def build_report(calibration_path: Path) -> dict[str, Any]:
             )
         )
 
-        activities = _run("adb", "shell", "dumpsys", "activity", "activities")
-        activity_text = "" if activities is None else activities.stdout
-        focused = QUEST_PACKAGE in activity_text and "topResumedActivity" in activity_text
+        focused = quest_activity_resumed(assume_connected=True)
         checks.append(
             _result(
                 "frankabot_activity",

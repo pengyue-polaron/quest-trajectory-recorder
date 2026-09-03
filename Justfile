@@ -10,7 +10,7 @@ setup:
 
 # Show read-only Quest, APK, ADB port, and calibration checks.
 doctor profile="lab":
-    @scripts/run_quest_doctor.sh --calibration "calibrations/{{ profile }}.json"
+    @scripts/run_quest_doctor.sh --calibration "$(.venv/bin/python -m quest_trajectory_recorder.profile_cli path '{{ profile }}')"
 
 # Show concise Quest/app/port state; exits non-zero unless fully ready.
 adb-status:
@@ -38,59 +38,44 @@ adb-install:
 
 # Start web calibration and return after its page is ready.
 calibrate profile="lab":
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli start calibration --profile "{{ profile }}"
+    @.venv/bin/python -m quest_trajectory_recorder.calibration_cli start --profile "{{ profile }}"
 
-# Start physical ForceVLA/MuJoCo and return after feedback + Foxglove are ready.
-forcevla profile="lab" *args:
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli start forcevla --profile "{{ profile }}" -- {{ args }}
+# Publish physical Quest targets until interrupted; consumers subscribe over ZMQ.
+source profile="lab" *args:
+    @.venv/bin/python -m quest_trajectory_recorder.source_cli --profile "{{ profile }}" {{ args }}
 
-# Start physical ManiSkill and return after feedback + Foxglove are ready.
-maniskill profile="lab" task="cube_sort" *args:
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli start maniskill --profile "{{ profile }}" --task "{{ task }}" -- {{ args }}
+# List profiles and show whether they live in user or legacy storage.
+profiles:
+    @.venv/bin/python -m quest_trajectory_recorder.profile_cli list
 
-# Stop whichever managed calibration or teleoperation task is active.
+# Print the resolved path for one named profile.
+profile-path profile="lab":
+    @.venv/bin/python -m quest_trajectory_recorder.profile_cli path "{{ profile }}"
+
+# Stop the managed calibration page.
 stop:
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli stop
+    @.venv/bin/python -m quest_trajectory_recorder.calibration_cli stop
 
-# Show concise health for the active managed task.
+# Show concise health for the calibration page.
 status:
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli status
+    @.venv/bin/python -m quest_trajectory_recorder.calibration_cli status
 
-# Print stable task health JSON for an Agent or script.
+# Print stable calibration health JSON for an Agent or script.
 status-json:
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli status --json
+    @.venv/bin/python -m quest_trajectory_recorder.calibration_cli status --json
 
 # Show the tail of the latest managed-task log.
 logs lines="80":
-    @.venv/bin/python -m quest_trajectory_recorder.session_cli logs --lines "{{ lines }}"
-
-# Run the controller-free ForceVLA smoke workflow.
-synthetic-forcevla *args:
-    @scripts/run_quest_session.sh --backend mujoco --synthetic {{ args }}
-
-# Run the controller-free ManiSkill smoke workflow.
-synthetic-maniskill task="cube_sort" *args:
-    @scripts/run_quest_session.sh --backend maniskill --synthetic --task "{{ task }}" {{ args }}
-
-# Package and install the local Foxglove extension.
-foxglove-install:
-    @npm --prefix foxglove/quest-teleop-controls run local-install
+    @.venv/bin/python -m quest_trajectory_recorder.calibration_cli logs --lines "{{ lines }}"
 
 # Run all repository checks used by CI.
-check: check-python check-ui check-shell
+check: check-python check-shell
 
 # Run Python tests and Ruff checks.
 check-python:
     .venv/bin/pytest -q
     .venv/bin/ruff check .
     .venv/bin/ruff format --check .
-
-# Typecheck, lint, audit, and package the Foxglove extension.
-check-ui:
-    npm --prefix foxglove/quest-teleop-controls run typecheck
-    npm --prefix foxglove/quest-teleop-controls run lint
-    npm --prefix foxglove/quest-teleop-controls audit --audit-level=high
-    npm --prefix foxglove/quest-teleop-controls run package
 
 # Validate maintained shell launchers.
 check-shell:
