@@ -19,6 +19,8 @@ def test_source_resolves_profile_and_executes_only_the_publisher(monkeypatch, tm
         )
     )
     monkeypatch.setattr(source_cli, "profile_path", lambda name, must_exist: profile)
+    stopped = []
+    monkeypatch.setattr(source_cli, "calibration_main", lambda argv: stopped.append(argv) or 0)
     monkeypatch.setattr(source_cli, "device_main", lambda argv: 0)
     executed = {}
 
@@ -38,3 +40,4 @@ def test_source_resolves_profile_and_executes_only_the_publisher(monkeypatch, tm
     assert "--target-bind" in command
     assert "foxglove" not in " ".join(command).lower()
     assert "backend" not in " ".join(command).lower()
+    assert stopped == [["stop"]]

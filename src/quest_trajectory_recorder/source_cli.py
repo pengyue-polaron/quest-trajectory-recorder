@@ -7,6 +7,7 @@ import json
 import os
 import sys
 
+from .calibration_cli import main as calibration_main
 from .calibration_profiles import calibration_health, profile_path
 from .device_cli import main as device_main
 
@@ -34,6 +35,10 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError(
             f"invalid calibration profile {calibration}: {'; '.join(health['issues'])}"
         )
+    # Calibration and streaming consume the same raw APK ports. Both belong to
+    # this source adapter, so consumers never need to coordinate that handoff.
+    if calibration_main(["stop"]) != 0:
+        return 1
     if not args.no_prepare:
         status = device_main(["prepare", "--wait-seconds", str(args.adb_wait_seconds)])
         if status != 0:
