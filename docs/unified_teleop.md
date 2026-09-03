@@ -43,6 +43,7 @@ Create one profile for each physical setup:
 
 ```bash
 just calibrate lab
+just stop
 ```
 
 The calibration page uses `http://127.0.0.1:8766`; it never shares
@@ -51,17 +52,21 @@ Foxglove's collection port.
 Then start one complete session:
 
 ```bash
-# ManiSkill
+# Choose ManiSkill...
 just maniskill lab cube_sort --scene-seed 17001 --record
 
-# MuJoCo
-just forcevla lab --record
+# ...or MuJoCo:
+# just forcevla lab --record
 ```
 
-The launcher starts/rechecks the FrankaBot APK, runs the device doctor, binds
-the raw Quest ports in the tracker hub, starts the selected backend, starts the
-Foxglove SDK gateway, and opens the organization layout. Exiting the backend or
-interrupting the launcher stops the complete child-process set.
+Each public start command runs as one detached managed task and returns only
+after the service is usable. The lifecycle wrapper starts/rechecks FrankaBot,
+runs the device doctor, binds the raw Quest ports in the tracker hub, starts the
+selected backend and Foxglove SDK gateway, verifies Foxglove plus backend
+feedback, and opens the organization layout. Use `just status` or
+`just status-json` for health, `just logs` for recent output, and `just stop` to
+stop the complete child-process set. Repeating the same start is idempotent;
+starting a different task reports the active task instead of replacing it.
 
 It waits up to 120 seconds for an authorized Quest by default, so the practical
 sequence is simply: power/wake Quest, connect USB, run the command, wear the
@@ -72,10 +77,11 @@ failed ADB probe is debounced. If Meta steals focus, the Foxglove state changes
 to `App not active`; run `just adb-focus`. Only use `just adb-restart` when soft
 focus fails, because it explicitly starts a fresh Unity activity.
 
-For unattended diagnosis, `just adb-status-json` returns the stable
-`quest.adb_status/v1` object and a non-zero exit code unless USB, FrankaBot
-focus, and all reverse ports are ready. `just adb-prepare` is safe to retry: it
-repairs mappings and focuses an inactive app without restarting an active one.
+For unattended diagnosis, `just status-json` reports the whole managed task;
+`just adb-status-json` returns the lower-level `quest.adb_status/v1` device
+object and a non-zero exit code unless USB, FrankaBot focus, and all reverse
+ports are ready. `just adb-prepare` is safe to retry: it repairs mappings and
+focuses an inactive app without restarting an active one.
 
 Do wear the headset while controlling. Meta can leave ADB and the controller
 radio connected while marking the controller `CONNECTED_INACTIVE`; in that

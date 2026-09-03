@@ -68,14 +68,21 @@ task diagnostics, and only acknowledges a command after its effect is complete.
 
 ```bash
 just calibrate <profile>
+just stop
+# Choose one backend:
 just maniskill <profile> cube_sort --record
-just forcevla <profile> --record
+# just forcevla <profile> --record
+just status-json
+just stop
 ```
 
-`run_quest_session.sh` is the composition root. It starts one target source,
-one backend, and one Foxglove gateway, and terminates the complete child set on
-exit. Low-level component scripts remain for diagnosis and focused tests; see
-`scripts/README.md`.
+`session_cli` is the Agent lifecycle boundary. It allows exactly one managed
+calibration or teleoperation task, persists its PID and log outside the
+repository, waits for protocol-level readiness, exposes JSON health, and stops
+idempotently. `run_quest_session.sh` remains the single teleoperation
+composition root beneath it: one target source, one backend, and one Foxglove
+gateway, with complete child-set cleanup. Low-level component scripts remain
+for diagnosis and focused tests; see `scripts/README.md`.
 
 ADB lifecycle is asymmetric by design: background health monitoring may repair
 reverse ports and publish state, but only an explicit operator/Agent command

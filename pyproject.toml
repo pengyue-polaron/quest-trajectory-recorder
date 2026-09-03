@@ -31,6 +31,7 @@ quest-synthetic-target = "quest_trajectory_recorder.synthetic_target:main"
 quest-doctor = "quest_trajectory_recorder.device_doctor:main"
 quest-adb = "quest_trajectory_recorder.device_cli:main"
 quest-foxglove-bridge = "quest_trajectory_recorder.foxglove_bridge:main"
+quest-session = "quest_trajectory_recorder.session_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

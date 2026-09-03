@@ -4,6 +4,12 @@ Run `just` from the repository root for the supported human/Agent command
 surface. Scripts in this directory are the implementation layer behind those
 recipes and remain directly callable for debugging.
 
+The public `calibrate`, `forcevla`, and `maniskill` recipes are managed by
+`quest_trajectory_recorder.session_cli`. They return only after readiness and
+are paired with `just status`, `just status-json`, `just logs`, and the
+idempotent `just stop`. Runtime PID/state/log files live under the operating
+system temporary directory, never in a repository checkout.
+
 ## Primary workflow
 
 - `run_quest_session.sh`: the only maintained ManiSkill/MuJoCo collection

@@ -40,3 +40,13 @@ def test_forcevla_session_starts_with_closed_gripper() -> None:
 
     assert 'if [[ "$BACKEND" == "mujoco" ]]; then\n  INITIAL_GRIPPER="closed"' in launcher
     assert '--initial-gripper "$INITIAL_GRIPPER"' in launcher
+
+
+def test_justfile_exposes_one_agent_lifecycle_for_calibration_and_backends() -> None:
+    justfile = (Path(__file__).resolve().parents[1] / "Justfile").read_text(encoding="utf-8")
+
+    assert "session_cli start calibration" in justfile
+    assert "session_cli start forcevla" in justfile
+    assert "session_cli start maniskill" in justfile
+    assert "session_cli stop" in justfile
+    assert "session_cli status --json" in justfile

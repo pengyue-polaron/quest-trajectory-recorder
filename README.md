@@ -23,9 +23,21 @@ Agents. Run `just` to list it. The normal physical workflow is:
 ```bash
 just adb-status
 just calibrate lab                 # only when the physical setup changed
+just stop                          # close calibration after saving the profile
 just forcevla lab --record         # ForceVLA / MuJoCo
+just status                        # concise live health
+just stop                          # stop the complete active task
+# Or start ManiSkill instead:
 just maniskill lab cube_sort --record
 ```
+
+`calibrate`, `forcevla`, and `maniskill` are Agent-friendly lifecycle
+commands: each starts a detached managed task, performs the device and protocol
+checks internally, and returns only after the page or backend is ready. Only one
+managed task may run at a time. `just status-json` is the stable machine-readable
+probe, `just logs` shows the latest log, and `just stop` is idempotent. Stopping
+an active recording never silently labels it training-ready; save it in
+Foxglove first when it should become a demonstration.
 
 `just adb-prepare` repairs ADB reverse mappings and brings FrankaBot forward
 without restarting it. `just adb-focus` is the next recovery step if a Meta
@@ -80,11 +92,14 @@ The end-to-end launcher, no-controller synthetic validation, recording layout,
 safety behavior, and physical-controller checklist are documented in
 [`docs/unified_teleop.md`](docs/unified_teleop.md).
 
-The maintained flow is one supervised command:
+The maintained flow is one managed command followed by an explicit stop:
 
 ```bash
+# Choose one backend:
 just maniskill lab cube_sort --record
-just forcevla lab --record
+# just forcevla lab --record
+just status
+just stop
 ```
 
 The launcher owns the target source, selected backend, and Foxglove gateway as
@@ -94,14 +109,15 @@ synthetic-forcevla` or `just synthetic-maniskill`. See
 [`scripts/README.md`](scripts/README.md) for the intentionally small script
 surface.
 
-After a profile exists, that single command is the complete physical workflow:
+After a profile exists, the start command is the complete physical workflow:
 it waits for USB/ADB, configures every reverse port, brings FrankaBot to the
-foreground, starts the source/backend/Foxglove processes, and keeps checking
-ADB and app focus. Put on the headset, pick up the right controller, press `B`
-to clutch, and operate. If USB or controller tracking drops, Cartesian motion
-freezes; reconnect USB or pick up and wave the controller. After six stable
-frames the mapper re-anchors at the current robot pose instead of chasing the
-old controller pose.
+foreground, starts the source/backend/Foxglove processes, verifies a real
+Foxglove handshake and backend feedback, then prints `READY` and returns. Put
+on the headset, pick up the right controller, press `B` to clutch, and operate.
+If USB or controller tracking drops, Cartesian motion freezes; reconnect USB
+or pick up and wave the controller. After six stable frames the mapper
+re-anchors at the current robot pose instead of chasing the old controller
+pose.
 
 Meta may put a controller into `CONNECTED_INACTIVE` when the headset is not
 worn. ADB can still look healthy in that state, but 6DoF input is unavailable.
@@ -224,7 +240,8 @@ just calibrate lab
 This writes `calibrations/lab.json`. Use a different profile name for
 a different table / chair / camera setup. The web UI also has a `Profile`
 section, so you can load an existing profile or save the current calibration
-under a new name without restarting the server.
+under a new name without restarting the server. After saving, run `just stop`;
+the same command also closes a managed teleoperation task.
 
 Start the live viewer in LAN mode:
 

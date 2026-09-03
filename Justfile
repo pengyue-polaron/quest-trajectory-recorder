@@ -36,17 +36,33 @@ adb-restart:
 adb-install:
     @scripts/start_frankabot.sh
 
-# Open web calibration and save the named local profile.
+# Start web calibration and return after its page is ready.
 calibrate profile="lab":
-    @scripts/run_calibration.sh "{{ profile }}"
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli start calibration --profile "{{ profile }}"
 
-# Run physical ForceVLA/MuJoCo teleoperation; append backend flags after the profile.
+# Start physical ForceVLA/MuJoCo and return after feedback + Foxglove are ready.
 forcevla profile="lab" *args:
-    @scripts/run_quest_session.sh --backend mujoco --profile "{{ profile }}" {{ args }}
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli start forcevla --profile "{{ profile }}" -- {{ args }}
 
-# Run physical ManiSkill teleoperation for the selected task.
+# Start physical ManiSkill and return after feedback + Foxglove are ready.
 maniskill profile="lab" task="cube_sort" *args:
-    @scripts/run_quest_session.sh --backend maniskill --profile "{{ profile }}" --task "{{ task }}" {{ args }}
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli start maniskill --profile "{{ profile }}" --task "{{ task }}" -- {{ args }}
+
+# Stop whichever managed calibration or teleoperation task is active.
+stop:
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli stop
+
+# Show concise health for the active managed task.
+status:
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli status
+
+# Print stable task health JSON for an Agent or script.
+status-json:
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli status --json
+
+# Show the tail of the latest managed-task log.
+logs lines="80":
+    @.venv/bin/python -m quest_trajectory_recorder.session_cli logs --lines "{{ lines }}"
 
 # Run the controller-free ForceVLA smoke workflow.
 synthetic-forcevla *args:
