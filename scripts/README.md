@@ -14,8 +14,9 @@ recipes and remain directly callable for debugging.
 
 ## Device and environment
 
-- `setup.sh`: install the Quest tools and the canonical `embodied-ops` ZMQ
-  dependency.
+- `setup.sh`: install the Quest tools and the published canonical
+  `embodied-ops[teleop-zmq]` dependency. `EMBODIED_OPS_ROOT` is an optional
+  editable override for package development, not a runtime prerequisite.
 - `start_frankabot.sh`: wait for ADB, install/start or re-focus the recovered
   Quest APK, and configure all reverse ports.
 - `run_quest_doctor.sh`: read-only ADB/APK/reverse-port/calibration checks.

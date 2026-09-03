@@ -10,9 +10,9 @@ The codebase is split into small runtime modules: `receiver.py` parses Quest
 frames, `teleop_frame.py` applies saved calibration profiles,
 `teleop_target.py` adapts Quest-specific metadata into the shared schema, and
 `quest_tracker_hub.py` publishes that target stream. Shared transport contracts
-and geometry live in the sibling `embodied-ops` repository. Foxglove is the
-only collection observation and control UI; the browser page is retained only
-for Quest calibration.
+and geometry come from the versioned `embodied-ops` Python package. Foxglove is
+the only collection observation and control UI; the browser page is retained
+only for Quest calibration.
 See `docs/architecture.md` for the full module map.
 
 ## Daily workflow
@@ -130,8 +130,9 @@ source .venv/bin/activate
 Install `just` once on macOS with `brew install just`; `scripts/setup.sh`
 remains available as the bootstrap command before `just` is installed.
 
-`scripts/setup.sh` installs the sibling `../embodied-ops` checkout first. Set
-`EMBODIED_OPS_ROOT` if the repositories are not siblings.
+`scripts/setup.sh` installs `embodied-ops[teleop-zmq]` from PyPI. A contributor
+developing both packages may explicitly set `EMBODIED_OPS_ROOT` to overlay a
+local editable checkout; ordinary users do not clone that repository.
 
 For ADB reverse mode, install Android platform tools and enable USB debugging on the Quest headset.
 
