@@ -44,7 +44,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    calibration = profile_path(args.profile)
+    # Calibration is always authored in user storage. Legacy checkout profiles are
+    # read-only migration inputs and must never become an editor destination.
+    calibration = profile_path(args.profile, legacy_dir=None)
     stop = threading.Event()
     attachment = threading.Thread(
         target=_attach_quest,

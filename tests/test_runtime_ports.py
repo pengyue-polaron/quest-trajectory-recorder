@@ -28,6 +28,7 @@ def test_calibration_page_uses_package_native_hot_adb_runtime() -> None:
 
     assert "quest_trajectory_recorder.calibration_runtime" in launcher
     assert "quest_trajectory_recorder.calibration_runtime" in lifecycle
+    assert "profile_path(args.profile, legacy_dir=None)" in runtime
     assert "live3d_main" in runtime
     assert "device_main" in runtime
     assert "adb_connected" in runtime
