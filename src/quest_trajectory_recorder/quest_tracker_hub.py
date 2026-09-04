@@ -210,6 +210,37 @@ def _source_state(
     return "streaming" if gate_open else "ready"
 
 
+def _prepare_initial_adb(
+    required_ports: list[int],
+    *,
+    connected_fn: Callable[[], bool] = adb_connected,
+    setup_reverse_fn: Callable[[list[int]], None] = setup_adb_reverse,
+    activity_resumed_fn: Callable[[], bool] = quest_activity_resumed,
+    focus_fn: Callable[[], None] = focus_frankabot,
+    device_info_fn: Callable[[], dict[str, Any]] = quest_device_info,
+) -> dict[str, Any]:
+    """Prepare an available Quest without making a USB flap fatal to the source."""
+
+    if not connected_fn():
+        print(
+            "ADB device is not connected yet; the hub will restore reverse ports after reconnect.",
+            flush=True,
+        )
+        return dict(_DISCONNECTED_DEVICE)
+    try:
+        setup_reverse_fn(required_ports)
+        if not activity_resumed_fn():
+            focus_fn()
+        return dict(device_info_fn())
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(
+            f"Initial ADB preparation was interrupted ({exc}); "
+            "the hub will stay safe and retry after reconnect.",
+            flush=True,
+        )
+        return dict(_DISCONNECTED_DEVICE)
+
+
 def main() -> int:
     args = parse_args()
     required_ports = [
@@ -228,16 +259,16 @@ def main() -> int:
         raise ValueError("status and ADB check intervals must be non-negative")
     if not math.isfinite(args.tracking_loss_grace_ms) or args.tracking_loss_grace_ms < 0:
         raise ValueError("--tracking-loss-grace-ms must be finite and non-negative")
-    if args.adb_reverse:
-        if adb_connected():
-            setup_adb_reverse(required_ports)
-            if not quest_activity_resumed():
-                focus_frankabot()
-        else:
-            print(
-                "ADB device is not connected yet; the hub will restore reverse ports after reconnect.",
-                flush=True,
-            )
+    device = (
+        _prepare_initial_adb(required_ports)
+        if args.adb_reverse
+        else {
+            "adb_connected": None,
+            "model": None,
+            "serial": None,
+            "app_resumed": None,
+        }
+    )
     calibration_path = None if not args.calibration else Path(args.calibration)
     calibration = load_quest_calibration(calibration_path)
     calibration_sha256 = (
@@ -275,16 +306,6 @@ def main() -> int:
     )
     stop = False
     last_status_at = 0.0
-    device = (
-        quest_device_info()
-        if args.adb_reverse
-        else {
-            "adb_connected": None,
-            "model": None,
-            "serial": None,
-            "app_resumed": None,
-        }
-    )
     adb_monitor = (
         _AdbHealthMonitor(
             required_ports=required_ports,

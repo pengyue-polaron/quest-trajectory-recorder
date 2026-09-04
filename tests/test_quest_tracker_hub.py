@@ -3,7 +3,11 @@ from __future__ import annotations
 import threading
 import time
 
-from quest_trajectory_recorder.quest_tracker_hub import _AdbHealthMonitor, _source_state
+from quest_trajectory_recorder.quest_tracker_hub import (
+    _AdbHealthMonitor,
+    _prepare_initial_adb,
+    _source_state,
+)
 
 
 def _wait_for_update(monitor: _AdbHealthMonitor):
@@ -178,3 +182,28 @@ def test_adb_health_monitor_shutdown_interrupts_long_schedule_wait() -> None:
 
     assert time.monotonic() - started < 0.1
     assert not monitor._thread.is_alive()
+
+
+def test_initial_adb_reverse_failure_defers_to_health_monitor(capsys) -> None:
+    focus_calls: list[bool] = []
+
+    def fail_reverse(_ports: list[int]) -> None:
+        raise RuntimeError("USB re-enumerated")
+
+    device = _prepare_initial_adb(
+        [8100, 8125],
+        connected_fn=lambda: True,
+        setup_reverse_fn=fail_reverse,
+        activity_resumed_fn=lambda: False,
+        focus_fn=lambda: focus_calls.append(True),
+        device_info_fn=lambda: {"adb_connected": True},
+    )
+
+    assert device == {
+        "adb_connected": False,
+        "model": None,
+        "serial": None,
+        "app_resumed": False,
+    }
+    assert focus_calls == []
+    assert "stay safe and retry after reconnect" in capsys.readouterr().out
