@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -20,7 +21,6 @@ from urllib.request import urlopen
 
 from .device_cli import status_payload as device_status_payload
 
-ROOT = Path(__file__).resolve().parents[2]
 STATE_SCHEMA = "quest.calibration_session/v1"
 LEGACY_STATE_SCHEMA = "quest.agent_session/v1"
 DEFAULT_PORT = 8766
@@ -92,7 +92,12 @@ def _managed(state: dict[str, Any]) -> bool:
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError):
         return False
     return alive and any(
-        marker in command for marker in ("run_calibration.sh", "quest_trajectory_recorder.live3d")
+        marker in command
+        for marker in (
+            "run_calibration.sh",
+            "quest_trajectory_recorder.calibration_runtime",
+            "quest_trajectory_recorder.live3d",
+        )
     )
 
 
@@ -125,7 +130,15 @@ def _utc_now() -> str:
 
 def start(args: argparse.Namespace) -> int:
     port = int(os.environ.get("CALIBRATION_WEB_PORT", DEFAULT_PORT))
-    command = [str(ROOT / "scripts" / "run_calibration.sh"), args.profile]
+    command = [
+        sys.executable,
+        "-m",
+        "quest_trajectory_recorder.calibration_runtime",
+        "--profile",
+        args.profile,
+        "--web-port",
+        str(port),
+    ]
     requested = {
         "schema_version": STATE_SCHEMA,
         "session_id": str(uuid.uuid4()),
@@ -149,7 +162,6 @@ def start(args: argparse.Namespace) -> int:
         with _log_path().open("w", encoding="utf-8") as log:
             process = subprocess.Popen(  # noqa: S603 - fixed local launcher
                 command,
-                cwd=ROOT,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
