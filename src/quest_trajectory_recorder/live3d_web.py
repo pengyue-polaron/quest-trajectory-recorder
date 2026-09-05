@@ -223,6 +223,7 @@ let commandPending = false;
 let pendingButton = null;
 let pendingLabel = '';
 let calibrationLoadVersion = 0;
+let editorPollPending = false;
 const actionFeedback = document.getElementById('actionFeedback');
 const cancelCalibrationBtn = document.getElementById('cancelCalibration');
 
@@ -255,8 +256,8 @@ async function requestJSON(url, options={}) {
     const text = await response.text();
     let result;
     try { result = JSON.parse(text); }
-    catch (_) { throw new Error(!response.ok && text ? text.slice(0,500) : `Server returned an invalid response (HTTP ${response.status}).`); }
-    if (!response.ok) throw new Error(result.message || `Request failed (HTTP ${response.status}).`);
+    catch (_) { throw Object.assign(new Error(!response.ok && text ? text.slice(0,500) : `Server returned an invalid response (HTTP ${response.status}).`), {status:response.status}); }
+    if (!response.ok) throw Object.assign(new Error(result.message || `Request failed (HTTP ${response.status}).`), {status:response.status});
     return result;
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('No confirmation within 4 seconds. Check the source status before retrying; your draft is retained.');
@@ -285,14 +286,15 @@ function applyEditor(next) {
   updateStats();
 }
 async function refreshEditor() {
+  if (editorPollPending) return;
+  editorPollPending = true;
   try {
-    const response = await fetch('/editor/status', {cache:'no-store'});
-    if (response.status === 404) { editorSession = null; return; }
-    if (!response.ok) throw new Error('Source unavailable');
-    applyEditor(await response.json());
-  } catch (_) {
+    applyEditor(await requestJSON('/editor/status'));
+  } catch (error) {
+    if (error.status === 404) { editorSession = null; return; }
     if (editorSession) editorSession.tracking_valid = false;
-  } finally { updateStats(); }
+    if (editorSession === undefined) notifyAction('error', 'Source unavailable. Check the service connection; the page will retry.');
+  } finally { editorPollPending = false; updateStats(); }
 }
 async function editorCommand(action, extra={}) {
   const requestId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
