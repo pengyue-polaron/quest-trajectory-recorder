@@ -51,6 +51,7 @@ def test_repeated_roundtrips_save_apply_and_stop_page_updates(editor):
         assert json.loads(editor.path.read_text())["origin"]["x"] == 0.2 + index
         assert editor.calibration.origin[0] == 0.2 + index
         assert editor.state == "awaiting_b" and not editor.enabled
+        assert editor.snapshot()["last_action"] == "finish"
         editor.observe(RAW, index + 1, time.monotonic())
         assert len(editor.live.points) == 1  # no idle pose stream
         editor.pause(False)
@@ -65,6 +66,7 @@ def test_invalid_and_stale_finish_do_not_apply(editor):
     command(editor, "begin")
     assert not command(editor, "finish", calibration={})["applied"]
     assert editor.path.read_bytes() == original and not editor.enabled
+    assert editor.snapshot()["last_action"] == "begin"
     request = {
         "action": "finish",
         "request_id": "one",
@@ -85,6 +87,7 @@ def test_cancel_keeps_profile_and_needs_explicit_b(editor):
     command(editor, "begin")
     assert command(editor, "cancel")["applied"]
     assert editor.path.read_bytes() == original and not editor.enabled
+    assert editor.snapshot()["last_action"] == "cancel"
 
 
 def test_failed_disk_save_stays_calibrating(editor, monkeypatch):

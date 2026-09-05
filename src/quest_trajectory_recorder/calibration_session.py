@@ -39,6 +39,7 @@ class CalibrationSession:
         self.calibration = load_quest_calibration(path)
         self.digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
         self.state = "teleop" if self.calibration is not None else "calibrating"
+        self.last_action: str | None = None
         self.revision = str(uuid.uuid4())
         self.url = url
         self.live = LiveState(max_points=5000)
@@ -57,6 +58,7 @@ class CalibrationSession:
             return {
                 "schema_version": "quest.calibration_editor/v1",
                 "state": self.state,
+                "last_action": self.last_action,
                 "active": self.state == "calibrating",
                 "revision": self.revision,
                 "profile": self.path.stem,
@@ -129,6 +131,7 @@ class CalibrationSession:
                 if action == "begin":
                     if self.state != "calibrating":
                         self.state = "calibrating"
+                        self.last_action = "begin"
                         self.revision = str(uuid.uuid4())
                         self.live.reset_points()
                         self.live.gate_open = False
@@ -158,6 +161,7 @@ class CalibrationSession:
                     if self.calibration is None:
                         raise ValueError("No saved calibration to return to")
                     self.state = "awaiting_b"
+                    self.last_action = action
                     self.revision = str(uuid.uuid4())
                     self.saw_pause = False
                     self.live.gate_open = False
@@ -175,6 +179,19 @@ class CalibrationSession:
                     "editor": self.snapshot(),
                 }
             except (OSError, ValueError, TypeError) as exc:
+                print(
+                    json.dumps(
+                        {
+                            "event": "calibration_request_failed",
+                            "time": iso_now(),
+                            "action": request.get("action"),
+                            "request_id": request_id,
+                            "revision": self.revision,
+                            "message": str(exc),
+                        }
+                    ),
+                    flush=True,
+                )
                 result = {
                     "accepted": False,
                     "applied": False,

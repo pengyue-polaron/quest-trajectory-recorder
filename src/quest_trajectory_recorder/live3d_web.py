@@ -113,6 +113,9 @@ HTML = r"""<!doctype html>
     button:disabled { color: #aaa; border-color: #e5e5e5; background: #fafafa; cursor: not-allowed; }
     button.full { grid-column: 1 / -1; }
     .profile-hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .action-feedback { position: sticky; top: 0; z-index: 2; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; line-height: 1.4; overflow-wrap: anywhere; }
+    .action-feedback[data-kind="success"] { border-color: #448361; color: #285c3e; background: #f3faf5; }
+    .action-feedback[data-kind="error"] { border-color: #c74740; color: #952d28; background: #fff5f4; }
     @media (max-width: 980px) {
       body { height: auto; min-height: 100vh; padding: 10px; overflow: auto; }
       .wrap { width: min(100%, 760px); margin: 0 auto; }
@@ -154,6 +157,7 @@ HTML = r"""<!doctype html>
       </section>
 
       <aside class="side">
+        <div id="actionFeedback" class="action-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></div>
         <p class="section-title">Setup</p>
         <div class="card subtle tool-card">
           <div class="metric-row">
@@ -216,18 +220,67 @@ let profileInitialized = false;
 let calibration = null;
 let editorSession;
 let commandPending = false;
+let pendingButton = null;
+let pendingLabel = '';
+let calibrationLoadVersion = 0;
+const actionFeedback = document.getElementById('actionFeedback');
 const cancelCalibrationBtn = document.getElementById('cancelCalibration');
+
+function notifyAction(kind, message) {
+  actionFeedback.hidden = false;
+  actionFeedback.dataset.kind = kind;
+  actionFeedback.textContent = message;
+}
+async function runAction(button, label, action) {
+  if (commandPending) return;
+  commandPending = true; pendingButton = button; pendingLabel = label;
+  calibrationLoadVersion++;
+  const originalLabel = button.textContent;
+  notifyAction('pending', label); updateStats();
+  try {
+    const message = await action();
+    notifyAction('success', message || 'Done.');
+  } catch (error) {
+    notifyAction('error', error.message || String(error));
+  } finally {
+    commandPending = false; pendingButton = null; button.textContent = originalLabel;
+    updateStats();
+  }
+}
+async function requestJSON(url, options={}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch(url, {...options, signal:controller.signal, cache:'no-store'});
+    const text = await response.text();
+    let result;
+    try { result = JSON.parse(text); }
+    catch (_) { throw new Error(!response.ok && text ? text.slice(0,500) : `Server returned an invalid response (HTTP ${response.status}).`); }
+    if (!response.ok) throw new Error(result.message || `Request failed (HTTP ${response.status}).`);
+    return result;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('No confirmation within 4 seconds. Check the source status before retrying; your draft is retained.');
+    if (error instanceof TypeError) throw new Error('Cannot reach the source. Check the connection; your draft is retained.');
+    throw error;
+  } finally { clearTimeout(timer); }
+}
 
 function applyEditor(next) {
   if (!next || next.schema_version !== 'quest.calibration_editor/v1') return;
   if (editorSession && next.revision !== editorSession.revision) {
     // Never keep an old tab's in-progress geometry after another editor applied a profile.
     if (editorSession.active && !next.active) {
-      loadServerCalibration(next.profile);
+      loadServerCalibration(next.profile).catch(error => { profileStatus.textContent = `Profile refresh failed: ${error.message}`; });
     }
-    if (next.active) { rawPoints = []; latestRaw = null; calibration = null; }
+    if (next.active) { calibrationLoadVersion++; rawPoints = []; latestRaw = null; calibration = null; }
   }
+  const changed = !editorSession || next.revision !== editorSession.revision;
   editorSession = next;
+  if (changed && !commandPending && next.state === 'awaiting_b') {
+    notifyAction('success', next.last_action === 'finish'
+      ? `Saved and applied: ${next.profile}. Return to your controls, then pause/resume B.`
+      : 'Editor closed. Pause/resume B to continue.');
+  }
   cancelCalibrationBtn.hidden = !next.active;
   updateStats();
 }
@@ -242,12 +295,13 @@ async function refreshEditor() {
   } finally { updateStats(); }
 }
 async function editorCommand(action, extra={}) {
-  const request = {action, request_id:crypto.randomUUID(), revision:editorSession?.revision, ...extra};
-  const response = await fetch('/editor/command', {method:'POST',
+  const requestId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2,'0')).join('');
+  const request = {action, request_id:requestId, revision:editorSession?.revision, ...extra};
+  const result = await requestJSON('/editor/command', {method:'POST',
     headers:{'Content-Type':'application/json'}, body:JSON.stringify(request)});
-  const result = await response.json();
   if (result.editor) applyEditor(result.editor);
-  if (!response.ok || !result.applied) throw new Error(result.message || 'Request failed');
+  if (!result.applied) throw new Error(result.message || 'Request was not applied.');
   return result;
 }
 
@@ -275,7 +329,9 @@ function sanitizeProfileName(name) {
 }
 function localSaveCalibration() {
   if (!calibration) return;
-  localStorage.setItem(profileKey(), JSON.stringify(calibration));
+  // Browser storage must never prevent an explicit server save.
+  try { localStorage.setItem(profileKey(), JSON.stringify(calibration)); }
+  catch (_) { /* The live draft stays in memory; Finish still saves to the source. */ }
 }
 function loadLocalCalibration(profile=currentProfile) {
   try {
@@ -312,33 +368,26 @@ function updateToolSummary() {
     : (gateOpen ? 'Streaming' : (pauseState ? `Paused (${pauseState})` : 'Waiting'));
   profileMetric.textContent = profileStateText();
 }
-function saveServerCalibration() {
+async function saveServerCalibration() {
   if (!isCalibrated()) {
-    updateCalibrationStatus('Finish right, forward, then origin before saving a profile.');
-    return Promise.resolve(false);
+    throw new Error('Complete right, forward, and origin before saving.');
   }
   currentProfile = sanitizeProfileName(profileNameInput.value);
   calibration.profile = currentProfile;
   calibration.savedAt = new Date().toISOString();
   localSaveCalibration();
   if (editorSession) {
-    return editorCommand('finish', {profile:currentProfile, calibration}).then(result => {
-      profileStatus.textContent = result.message;
-      return loadProfiles().then(() => true);
-    }).catch(err => { profileStatus.textContent = err.message; return false; });
+    const result = await editorCommand('finish', {profile:currentProfile, calibration});
+    loadProfiles().catch(() => {});
+    return `Saved and applied: ${result.editor.profile}. Return to your controls, then pause/resume B.`;
   }
-  return fetch(`/calibration?profile=${encodeURIComponent(currentProfile)}`, {
+  await requestJSON(`/calibration?profile=${encodeURIComponent(currentProfile)}`, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(calibration),
-  }).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    profileStatus.textContent = `Saved profile: ${currentProfile}`;
-    return loadProfiles().then(() => true);
-  }).catch(err => {
-    profileStatus.textContent = `Save failed: ${err.message}`;
-    return false;
   });
+  loadProfiles().catch(() => {});
+  return `Saved profile: ${currentProfile}.`;
 }
 function rawToDisplay(p) {
   const out = clonePoint(p);
@@ -467,12 +516,13 @@ function draw() {
   }
 }
 function updateCalibrationStatus(message=null) {
+  if (message) notifyAction('error', message);
   const rightMotion = currentRightMotion();
   const forwardMotion = currentForwardMotion();
   const rightMotionText = rightMotion ? `${fmt(rightMotion.length,3)} m horizontal movement` : '--';
   const forwardMotionText = forwardMotion ? `${fmt(forwardMotion.length,3)} m forward movement` : '--';
-  saveProfileBtn.disabled = !isCalibrated();
-  calibNextBtn.disabled = !!calibration && !isCalibrated() && !latestRaw;
+  saveProfileBtn.disabled = commandPending;
+  calibNextBtn.disabled = commandPending;
   if (!calibration || isCalibrated()) calibNextBtn.textContent = 'Start new calibration';
   else if (!hasRightStart()) calibNextBtn.textContent = 'Start collecting right';
   else if (!hasRight()) calibNextBtn.textContent = 'Finish right';
@@ -484,10 +534,10 @@ function updateCalibrationStatus(message=null) {
   else if (hasRightStart() && !hasRight()) nextActionEl.textContent = `${nextCalibrationAction()} Current movement: ${rightMotionText}.`;
   else nextActionEl.textContent = nextCalibrationAction();
   if (editorSession) {
-    saveProfileBtn.textContent = 'Finish Calibration';
-    saveProfileBtn.disabled = commandPending || !editorSession.active || !isCalibrated();
-    calibNextBtn.disabled = commandPending || (editorSession.active && calibration
-      && !isCalibrated() && (!latestRaw || !editorSession.tracking_valid));
+    saveProfileBtn.textContent = !editorSession.active && editorSession.last_action === 'finish' ? 'Saved ✓' : 'Finish Calibration';
+    saveProfileBtn.disabled = commandPending || !editorSession.active;
+    saveProfileBtn.title = !editorSession.active ? 'Editor is idle. Start a new calibration to edit.' : 'Save and apply this calibration.';
+    calibNextBtn.disabled = commandPending;
     if (!editorSession.active) {
       calibNextBtn.textContent = 'Start new calibration';
       nextActionEl.textContent = editorSession.state === 'awaiting_b'
@@ -496,6 +546,14 @@ function updateCalibrationStatus(message=null) {
     }
   }
   if (editorSession === undefined) { calibNextBtn.disabled = true; saveProfileBtn.disabled = true; }
+  cancelCalibrationBtn.disabled = commandPending;
+  loadProfileBtn.disabled = commandPending;
+  profileSelect.disabled = commandPending;
+  profileNameInput.disabled = commandPending;
+  document.getElementById('fit').disabled = commandPending;
+  document.getElementById('clear').disabled = commandPending;
+  if (pendingButton) { pendingButton.disabled = true; pendingButton.textContent = pendingLabel; }
+  document.querySelector('.side').setAttribute('aria-busy', String(commandPending));
 }
 function updateStats() {
   dot.classList.toggle('on', gateOpen);
@@ -523,9 +581,9 @@ function handleEvent(ev) {
 function requireLatest() {
   if (editorSession && (!editorSession.active || !editorSession.tracking_valid
       || !latestRaw || Date.now()/1000 - latestRaw.recv_unix > .5)) {
-    updateCalibrationStatus('Controller unavailable. Restore tracking before capturing.'); return null;
+    throw new Error('Controller unavailable. Wake it and keep it visible to the headset, then retry.');
   }
-  if (!latestRaw) { updateCalibrationStatus('No controller sample yet. Start streaming first.'); return null; }
+  if (!latestRaw) throw new Error('No controller sample yet. Restore tracking, then retry.');
   return rawVec(latestRaw);
 }
 function beginNewCalibration() {
@@ -536,18 +594,18 @@ function beginNewCalibration() {
 }
 function startRightCollection() {
   const p = requireLatest(); if (!p) return;
-  if (!calibration || isCalibrated()) { updateCalibrationStatus('Start a new calibration first.'); return; }
+  if (!calibration || isCalibrated()) throw new Error('Start a new calibration first.');
   calibration.rightStart = p;
   calibration.state = 'right_started';
   localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
 }
 function saveRightDirection() {
   const p = requireLatest(); if (!p) return;
-  if (!hasRightStart()) { updateCalibrationStatus('Start collecting right first.'); return; }
+  if (!hasRightStart()) throw new Error('Start collecting right first.');
   const rawDelta = sub(p, calibration.rightStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const length = norm(horizontal);
-  if (length < MIN_RIGHT_M) { updateCalibrationStatus(`Right movement too small (${fmt(length,3)} m). Move farther right and save again.`); return; }
+  if (length < MIN_RIGHT_M) throw new Error(`Right movement too short (${fmt(length,3)} m). Move at least ${MIN_RIGHT_M} m right, then retry.`);
   calibration.rightEnd = p;
   calibration.right = normalize(horizontal);
   calibration.state = 'right_ready';
@@ -555,19 +613,19 @@ function saveRightDirection() {
 }
 function startForwardSample() {
   const p = requireLatest(); if (!p) return;
-  if (!hasRight()) { updateCalibrationStatus('Save right first.'); return; }
+  if (!hasRight()) throw new Error('Finish right first.');
   calibration.forwardStart = p;
   calibration.state = 'forward_started';
   localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
 }
 function saveForwardDirection() {
   const p = requireLatest(); if (!p) return;
-  if (!hasRight() || !hasForwardStart()) { updateCalibrationStatus('Start collecting forward first.'); return; }
+  if (!hasRight() || !hasForwardStart()) throw new Error('Start collecting forward first.');
   const rawDelta = sub(p, calibration.forwardStart);
   const horizontal = sub(rawDelta, mul(QUEST_UP, dot3(rawDelta, QUEST_UP)));
   const orthogonal = sub(horizontal, mul(calibration.right, dot3(horizontal, calibration.right)));
   const length = norm(orthogonal);
-  if (length < MIN_RIGHT_M) { updateCalibrationStatus(`Forward movement too small (${fmt(length,3)} m). Move farther forward and save again.`); return; }
+  if (length < MIN_RIGHT_M) throw new Error(`Forward movement too short (${fmt(length,3)} m). Move at least ${MIN_RIGHT_M} m forward, then retry.`);
   let forward = normalize(cross(QUEST_UP, calibration.right));
   if (dot3(forward, orthogonal) < 0) forward = mul(forward, -1);
   calibration.forwardEnd = p;
@@ -578,52 +636,50 @@ function saveForwardDirection() {
 }
 function saveOrigin() {
   const p = requireLatest(); if (!p) return;
-  if (!hasForward()) { updateCalibrationStatus('Save forward first.'); return; }
+  if (!hasForward()) throw new Error('Finish forward first.');
   calibration.origin = p;
   calibration.state = 'ready';
   calibration.completedAt = new Date().toISOString();
   localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
-  if (!editorSession) saveServerCalibration();
 }
-calibNextBtn.onclick = async () => {
-  commandPending = true;
-  try {
+calibNextBtn.onclick = () => runAction(calibNextBtn, 'Applying…', async () => {
     if (editorSession && !editorSession.active) await editorCommand('begin');
-    if (!calibration || isCalibrated()) beginNewCalibration();
-    else if (!hasRightStart()) startRightCollection();
-    else if (!hasRight()) saveRightDirection();
-    else if (!hasForwardStart()) startForwardSample();
-    else if (!hasForward()) saveForwardDirection();
-    else if (!hasOrigin()) saveOrigin();
-  } catch (error) { profileStatus.textContent = error.message; }
-  finally { commandPending = false; updateStats(); }
-};
-cancelCalibrationBtn.onclick = async () => {
-  try { await editorCommand('cancel'); }
-  catch (error) { profileStatus.textContent = error.message; }
-};
-document.getElementById('clear').onclick = () => { rawPoints = []; refreshDisplayPoints(); updateStats(); draw(); };
-document.getElementById('fit').onclick = () => { zoom = 1; draw(); };
+    if (!calibration || isCalibrated()) { beginNewCalibration(); return 'New calibration started.'; }
+    if (!hasRightStart()) { startRightCollection(); return 'Collecting right. Move right, then click Finish right.'; }
+    if (!hasRight()) { saveRightDirection(); return 'Right direction captured.'; }
+    if (!hasForwardStart()) { startForwardSample(); return 'Collecting forward. Move forward, then click Finish forward.'; }
+    if (!hasForward()) { saveForwardDirection(); return 'Forward direction captured.'; }
+    if (!hasOrigin()) {
+      saveOrigin();
+      if (!editorSession) return await saveServerCalibration();
+      return 'Origin captured. Click Finish Calibration to save and apply.';
+    }
+});
+cancelCalibrationBtn.onclick = () => runAction(cancelCalibrationBtn, 'Cancelling…', async () => {
+  await editorCommand('cancel');
+  return 'Cancelled. Previous profile retained. Pause/resume B to continue.';
+});
+const clearBtn = document.getElementById('clear');
+const fitBtn = document.getElementById('fit');
+clearBtn.onclick = () => runAction(clearBtn, 'Clearing…', () => { rawPoints = []; refreshDisplayPoints(); updateStats(); draw(); return 'Displayed path cleared. Calibration is unchanged.'; });
+fitBtn.onclick = () => runAction(fitBtn, 'Fitting…', () => { zoom = 1; draw(); return 'View fitted.'; });
 profileNameInput.addEventListener('change', () => {
   currentProfile = sanitizeProfileName(profileNameInput.value);
   profileNameInput.value = currentProfile;
-  const local = loadLocalCalibration(currentProfile);
-  if (local) applyCalibration(local, currentProfile, `Loaded local draft: ${currentProfile}`);
-  else profileStatus.textContent = `Profile name set: ${currentProfile}`;
+  // Editing the destination name must not replace freshly captured geometry.
+  // Loading another profile is an explicit action through the selector/button.
+  if (calibration) { calibration.profile = currentProfile; localSaveCalibration(); }
+  profileStatus.textContent = `Profile name set: ${currentProfile}`;
+  notifyAction('success', `Profile name: ${currentProfile}. Click Finish Calibration to save.`);
   updateToolSummary();
 });
 profileSelect.addEventListener('change', () => {
   if (profileSelect.value) {
-    profileNameInput.value = profileSelect.value;
-    loadServerCalibration(profileSelect.value);
+    runAction(loadProfileBtn, 'Loading…', () => loadServerCalibration(profileSelect.value));
   }
 });
-loadProfileBtn.onclick = () => loadServerCalibration(profileNameInput.value);
-saveProfileBtn.onclick = async () => {
-  commandPending = true; updateStats();
-  try { await saveServerCalibration(); }
-  finally { commandPending = false; updateStats(); }
-};
+loadProfileBtn.onclick = () => runAction(loadProfileBtn, 'Loading…', () => loadServerCalibration(profileNameInput.value));
+saveProfileBtn.onclick = () => runAction(saveProfileBtn, 'Saving…', saveServerCalibration);
 canvas.addEventListener('mousedown', e => { dragging = true; dragStart = {x:e.clientX, y:e.clientY, az, el}; });
 window.addEventListener('mouseup', () => dragging = false);
 window.addEventListener('mousemove', e => {
@@ -634,7 +690,7 @@ window.addEventListener('mousemove', e => {
 });
 canvas.addEventListener('wheel', e => { e.preventDefault(); zoom *= Math.exp(-e.deltaY * 0.001); zoom = Math.max(.25, Math.min(6, zoom)); draw(); }, {passive:false});
 function loadProfiles() {
-  return fetch('/calibrations').then(r => r.json()).then(info => {
+  return requestJSON('/calibrations').then(info => {
     const activeProfile = sanitizeProfileName(info.active || currentProfile);
     if (!profileInitialized) {
       currentProfile = sanitizeProfileName(new URLSearchParams(location.search).get('profile') || activeProfile);
@@ -660,21 +716,21 @@ function loadProfiles() {
   });
 }
 function loadServerCalibration(profile=currentProfile) {
-  currentProfile = sanitizeProfileName(profile);
-  profileNameInput.value = currentProfile;
-  return fetch(`/calibration?profile=${encodeURIComponent(currentProfile)}`).then(r => r.ok ? r.json() : null).then(saved => {
+  const selected = sanitizeProfileName(profile);
+  const version = ++calibrationLoadVersion;
+  return requestJSON(`/calibration?profile=${encodeURIComponent(selected)}`).then(saved => {
+    if (version !== calibrationLoadVersion) return 'A newer action replaced this load.';
     if (saved && saved.version === CALIBRATION_VERSION) {
-      applyCalibration(saved, currentProfile, `Loaded profile: ${currentProfile}`);
+      applyCalibration(saved, selected, `Loaded profile: ${selected}`);
+      return `Loaded profile: ${selected}.`;
     } else {
-      const local = loadLocalCalibration(currentProfile);
-      applyCalibration(local, currentProfile, local ? `Loaded local draft: ${currentProfile}` : `No saved profile: ${currentProfile}`);
+      const local = loadLocalCalibration(selected);
+      if (local) { applyCalibration(local, selected); return `Loaded browser draft: ${selected}. Not saved to the source yet.`; }
+      throw new Error(`No saved profile: ${selected}. Your current draft is unchanged.`);
     }
-  }).catch(err => {
-    const local = loadLocalCalibration(currentProfile);
-    applyCalibration(local, currentProfile, local ? `Loaded local draft after server error: ${currentProfile}` : `Load failed: ${err.message}`);
   });
 }
-refreshEditor().then(() => loadProfiles()).then(() => loadServerCalibration(currentProfile));
+refreshEditor().then(() => loadProfiles()).then(() => loadServerCalibration(currentProfile)).catch(error => notifyAction('error', error.message));
 setInterval(refreshEditor, 1000);
 fetch('/snapshot').then(r => r.json()).then(handleEvent).catch(() => {});
 const es = new EventSource('/events');

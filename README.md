@@ -22,6 +22,11 @@ running source it starts the standalone, page-first editor as before.
 4. Pause B, then resume B. New targets use the saved transform. **Cancel** retains
    the previous profile and also requires B before resuming.
 
+Every button reports progress and a persistent result in the editor. Finish
+shows **Saving…**, then **Saved ✓** only after acknowledgement. Failed requests
+show the reason and retain the draft; unconfirmed requests time out after four
+seconds. Profile-list and pose refreshes cannot overwrite action feedback.
+
 The source keeps publishing status and gated targets throughout; subscribers
 must honor the gate and calibration validity. Revisions change at mode boundaries
 so consumers can re-anchor even if they miss the invalidation packet. Metadata
