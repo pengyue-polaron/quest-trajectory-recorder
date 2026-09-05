@@ -2,6 +2,7 @@ import socket
 
 import zmq
 
+from quest_trajectory_recorder.alignment import Alignment
 from quest_trajectory_recorder.quest_target_source import DirectQuestTargetSource
 
 VALID = b"absolute|0.1,1.2,0.3|0,0,0,1|False"
@@ -42,6 +43,27 @@ def test_initial_gripper_state_is_configurable_for_held_start_tasks():
         target = source._update_remote(VALID, received_monotonic_ns=1_000_000_000)
         assert target is not None
         assert target.gripper == 1.0
+    finally:
+        source.close()
+        context.term()
+
+
+def test_unconfirmed_frame_blocks_even_no_gate_and_high():
+    context, source = make_source()
+    try:
+        source.alignment = Alignment(None)
+        source._update_pause("High")
+        sample = source._update_remote(VALID)
+        assert sample.tracking_valid and not sample.gate_open
+        source.alignment.state = "awaiting_b"
+        source._update_pause("High")
+        assert not source.gate_open
+        source._update_pause("Low")
+        source._update_pause("High")
+        assert source.gate_open
+        source.alignment.invalidate("recenter")
+        sample = source._update_remote(VALID)
+        assert not sample.gate_open
     finally:
         source.close()
         context.term()

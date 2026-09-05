@@ -1,5 +1,38 @@
 # Quest Trajectory Recorder
 
+## Tracking-frame confirmation
+
+The recovered APK does not provide a native reference-space epoch. On every
+source startup, confirm directions with `quest-align start`, move right at least
+15 cm, `quest-align finish`, return to neutral, `quest-align forward`, move
+forward at least 15 cm, then `quest-align finish`. Pause B and press B again to
+enable the stream. `just alignment-status` is a read-only readiness check.
+
+This quick correction is session-local: it does not overwrite the named profile.
+Targets include `source_metadata.calibration_valid` and an `alignment` object
+containing the state, reason, revision, observed tracking-frame evidence, and
+effective calibration axes. Original profile identity describes the loaded file,
+not a claim that the effective transform is unchanged.
+
+The source watches ADB boot/process identity and existing Recenter/Relocalization
+logs off the ingest thread. A detected change, or 15 seconds without verifiable
+frame evidence, invalidates confirmation and closes the stream gate. Alignment
+also rejects stale tracking, short strokes and inconsistent directions. Ordinary
+B pauses and controller tracking losses do not invalidate completed alignment.
+No reconnect path restarts the APK.
+
+The local ZMQ REP endpoint is `tcp://127.0.0.1:8133` (hub `--alignment-bind`). JSON
+requests contain `request_id`, `revision` and `action` (`status`, `start`, `finish`,
+`forward`). Responses contain `accepted`, `applied`, `message` and `alignment`.
+Mutations require the current revision; retries with the same ID are idempotent.
+Keep this unauthenticated endpoint on a trusted host/network.
+
+Detection is best effort, not a hardware safety guarantee: logs may be delayed
+or unavailable, and physically changing your facing direction cannot be inferred
+from a controller pose. Request Align whenever directions feel wrong. Guaranteed
+cross-session spatial continuity requires a future APK with explicit frame-change
+events or persistent spatial anchors.
+
 An input-device adapter for the controller-tracking Quest APK. Its maintained
 runtime boundary is deliberately small:
 

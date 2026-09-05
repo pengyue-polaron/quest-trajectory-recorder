@@ -44,6 +44,14 @@ calibrate profile="lab":
 source profile="lab" *args:
     @.venv/bin/python -m quest_trajectory_recorder.source_cli --profile "{{ profile }}" {{ args }}
 
+# Read source alignment state without moving or restarting anything.
+alignment-status:
+    @.venv/bin/python -m quest_trajectory_recorder.alignment_cli status
+
+# Advance direction capture: start (right), finish, forward, finish.
+align action:
+    @.venv/bin/python -m quest_trajectory_recorder.alignment_cli "{{ action }}"
+
 # List profiles and show whether they live in user or legacy storage.
 profiles:
     @.venv/bin/python -m quest_trajectory_recorder.profile_cli list

@@ -24,6 +24,7 @@ from embodied_ops.teleop.zmq_transport import (
     TeleopTargetPublisher,
 )
 
+from .alignment import Alignment, read_tracking_frame
 from .quest_ports import (
     DEFAULT_GRIPPER_PORT,
     adb_connected,
@@ -65,6 +66,7 @@ class _AdbHealthMonitor:
         reverse_ports_fn: Callable[[], set[int]] = adb_reverse_ports,
         setup_reverse_fn: Callable[[list[int]], None] = setup_adb_reverse,
         device_info_fn: Callable[[], dict[str, Any]] = quest_device_info,
+        frame_fn: Callable[[], dict[str, str] | None] | None = None,
     ) -> None:
         if check_sec <= 0:
             raise ValueError("ADB health-check interval must be positive")
@@ -74,6 +76,7 @@ class _AdbHealthMonitor:
         self._reverse_ports_fn = reverse_ports_fn
         self._setup_reverse_fn = setup_reverse_fn
         self._device_info_fn = device_info_fn
+        self._frame_fn = frame_fn
         self._previous_connected = bool(initial_device.get("adb_connected"))
         self._last_device = dict(initial_device)
         self._consecutive_disconnects = 0
@@ -114,6 +117,8 @@ class _AdbHealthMonitor:
                     self._setup_reverse_fn(missing_ports)
                     events.append(f"ADB reverse mappings restored: {missing_ports}")
                 device = dict(self._device_info_fn())
+                if self._frame_fn is not None:
+                    device["tracking_frame"] = self._frame_fn()
                 if device.get("adb_connected") is False:
                     connected = False
             except (OSError, RuntimeError, subprocess.SubprocessError):
@@ -174,6 +179,7 @@ def parse_args() -> argparse.Namespace:
         help="Ignore isolated invalid Quest pose placeholders for this long before holding.",
     )
     parser.add_argument("--target-bind", default=DEFAULT_TARGET_ENDPOINT)
+    parser.add_argument("--alignment-bind", default="tcp://127.0.0.1:8133")
     parser.add_argument("--print-every", type=int, default=30)
     parser.add_argument("--session-id", default="")
     parser.add_argument("--status-every-sec", type=float, default=1.0)
@@ -288,6 +294,11 @@ def main() -> int:
 
     context = zmq.Context()
     publisher = TeleopTargetPublisher(context, args.target_bind)
+    alignment = Alignment(calibration)
+    alignment_socket = context.socket(zmq.REP)
+    alignment_socket.setsockopt(zmq.LINGER, 0)
+    alignment_socket.setsockopt(zmq.MAXMSGSIZE, 8192)
+    alignment_socket.bind(args.alignment_bind)
     source = DirectQuestTargetSource(
         context=context,
         host=args.host,
@@ -303,6 +314,7 @@ def main() -> int:
         calibration_id=calibration_id,
         calibration_sha256=calibration_sha256,
         tracking_loss_grace_ms=args.tracking_loss_grace_ms,
+        alignment=alignment,
     )
     stop = False
     last_status_at = 0.0
@@ -311,6 +323,7 @@ def main() -> int:
             required_ports=required_ports,
             check_sec=args.adb_check_sec,
             initial_device=device,
+            frame_fn=read_tracking_frame,
         )
         if args.adb_reverse and args.adb_check_sec > 0
         else None
@@ -332,6 +345,35 @@ def main() -> int:
     print(f"Session: {session_id}", flush=True)
     try:
         while not stop:
+            now = time.monotonic()
+            if adb_monitor is not None:
+                for update in adb_monitor.take_updates():
+                    device = update.device
+                    alignment.evidence(device.get("tracking_frame"), now)
+                    for event in update.events:
+                        print(event, flush=True)
+            alignment.tick(now)
+            try:
+                request = alignment_socket.recv_json(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                pass
+            except (ValueError, UnicodeDecodeError):
+                alignment_socket.send_json(
+                    {"accepted": False, "applied": False, "message": "Invalid alignment request"}
+                )
+            else:
+                result = (
+                    alignment.command(request, now)
+                    if isinstance(request, dict)
+                    else {
+                        "accepted": False,
+                        "applied": False,
+                        "message": "Expected an object",
+                    }
+                )
+                alignment_socket.send_json(result)
+            if not alignment.enabled:
+                source.gate_open = False
             target = source.poll(50)
             for event in source.take_events():
                 print(event, flush=True)
@@ -355,7 +397,12 @@ def main() -> int:
                     source.latest_target = latest
                     target = latest
             if target is not None:
-                target = replace(target, host_published_unix_ns=time.time_ns())
+                target = replace(
+                    target,
+                    host_published_unix_ns=time.time_ns(),
+                    gate_open=target.gate_open and alignment.enabled,
+                    source_metadata={**target.source_metadata, **alignment.metadata()},
+                )
                 source.latest_target = target
                 publisher.publish(target)
             if (
@@ -372,12 +419,6 @@ def main() -> int:
                 )
 
             now = time.monotonic()
-            if adb_monitor is not None:
-                for update in adb_monitor.take_updates():
-                    device = update.device
-                    for event in update.events:
-                        print(event, flush=True)
-
             if args.status_every_sec > 0 and now - last_status_at >= args.status_every_sec:
                 target_age_sec = (
                     None
@@ -414,7 +455,7 @@ def main() -> int:
                     target_seq=None if source.latest_target is None else source.latest_target.seq,
                     target_age_ms=None if target_age_sec is None else target_age_sec * 1000.0,
                     gate_open=source.gate_open,
-                    control_ready=tracking_valid and source.gate_open,
+                    control_ready=tracking_valid and source.gate_open and alignment.enabled,
                     stream_online=raw_online,
                     tracking_valid=tracking_valid,
                     raw_age_ms=None if raw_age_sec is None else raw_age_sec * 1000.0,
@@ -431,6 +472,7 @@ def main() -> int:
                         "calibration_id": calibration_id,
                         "calibration_sha256": calibration_sha256,
                         **device,
+                        **alignment.metadata(),
                     },
                 )
                 publisher.publish_status(status)
@@ -439,6 +481,7 @@ def main() -> int:
         if adb_monitor is not None:
             adb_monitor.close()
         source.close()
+        alignment_socket.close(0)
         publisher.close()
         context.term()
     return 0
