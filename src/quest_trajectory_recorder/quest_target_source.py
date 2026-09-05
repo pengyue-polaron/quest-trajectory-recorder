@@ -154,8 +154,6 @@ class DirectQuestTargetSource:
         except (TypeError, ValueError):
             remote = None
         if not valid_remote(remote):
-            if self.alignment is not None:
-                self.alignment.sample(None, received_monotonic_ns / 1e9)
             self.invalid_remote_count += 1
             reason = "malformed_pose" if remote is None else "zero_or_invalid_pose"
             self.last_invalid_reason = reason
@@ -176,6 +174,8 @@ class DirectQuestTargetSource:
                 # same way, while the backend's stale-target watchdog remains
                 # the final safety bound.
                 return None
+            if self.alignment is not None:
+                self.alignment.sample(None, received_monotonic_ns / 1e9)
             if self.latest_raw_valid is True:
                 self.tracking_loss_count += 1
                 self.events.append("Controller tracking lost; publishing an immediate safety hold.")

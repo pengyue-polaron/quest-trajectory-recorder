@@ -69,6 +69,21 @@ def test_unconfirmed_frame_blocks_even_no_gate_and_high():
         context.term()
 
 
+def test_alignment_ignores_isolated_zero_placeholder():
+    context, source = make_source()
+    try:
+        source.alignment = Alignment(None)
+        source._update_remote(VALID, received_monotonic_ns=1_000_000_000)
+        source.alignment.state = "collecting_right"
+        source._update_remote(ZERO_PLACEHOLDER, received_monotonic_ns=1_020_000_000)
+        assert source.alignment.state == "collecting_right"
+        source._update_remote(ZERO_PLACEHOLDER, received_monotonic_ns=1_150_000_000)
+        assert source.alignment.state == "required"
+    finally:
+        source.close()
+        context.term()
+
+
 def test_isolated_origin_placeholder_does_not_break_tracking():
     context, source = make_source()
     try:
