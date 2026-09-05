@@ -297,7 +297,8 @@ def main() -> int:
     if calibration_path is None:
         raise ValueError("A calibration profile path is required")
     editor = CalibrationSession(
-        calibration_path, url=f"http://{args.web_host}:{args.web_port}/",
+        calibration_path,
+        url=f"http://{args.web_host}:{args.web_port}/",
         storage_dir=calibration_dir(),
     )
     control_socket = context.socket(zmq.REP)
@@ -305,7 +306,8 @@ def main() -> int:
     control_socket.setsockopt(zmq.MAXMSGSIZE, 65536)
     control_socket.bind(args.source_control_bind)
     server = ReusableThreadingHTTPServer(
-        (args.web_host, args.web_port), make_handler(editor.live, calibration_path, editor=editor),
+        (args.web_host, args.web_port),
+        make_handler(editor.live, calibration_path, editor=editor),
     )
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
@@ -362,7 +364,7 @@ def main() -> int:
                     for event in update.events:
                         print(event, flush=True)
             editor.drain()
-            if editor.last_pose_at is not None and now - editor.last_pose_at > .5:
+            if editor.last_pose_at is not None and now - editor.last_pose_at > 0.5:
                 editor.observe(None, source.raw_remote_count, now)
             try:
                 request = control_socket.recv_json(flags=zmq.NOBLOCK)
