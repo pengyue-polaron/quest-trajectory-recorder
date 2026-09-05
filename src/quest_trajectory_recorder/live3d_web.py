@@ -7,13 +7,16 @@ import queue
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
 from embodied_ops.teleop import atomic_write_json
 
 from .calibration_profiles import calibration_complete, calibration_file, sanitize_profile
 from .live_state import LiveState
+
+if TYPE_CHECKING:
+    from .calibration_session import CalibrationSession
 
 HTML = r"""<!doctype html>
 <html lang="en">
@@ -173,6 +176,7 @@ HTML = r"""<!doctype html>
         <div id="nextAction" class="next-action">Start a new calibration.</div>
         <div class="actions">
           <button id="calibNext" class="primary full">Start new calibration</button>
+          <button id="cancelCalibration" class="full" hidden>Cancel calibration</button>
         </div>
       </aside>
     </div>
@@ -210,6 +214,42 @@ const MIN_RIGHT_M = 0.05;
 let currentProfile = 'quest_teleop_frame';
 let profileInitialized = false;
 let calibration = null;
+let editorSession;
+let commandPending = false;
+const cancelCalibrationBtn = document.getElementById('cancelCalibration');
+
+function applyEditor(next) {
+  if (!next || next.schema_version !== 'quest.calibration_editor/v1') return;
+  if (editorSession && next.revision !== editorSession.revision) {
+    // Never keep an old tab's in-progress geometry after another editor applied a profile.
+    if (editorSession.active && !next.active) {
+      loadServerCalibration(next.profile);
+    }
+    if (next.active) { rawPoints = []; latestRaw = null; calibration = null; }
+  }
+  editorSession = next;
+  cancelCalibrationBtn.hidden = !next.active;
+  updateStats();
+}
+async function refreshEditor() {
+  try {
+    const response = await fetch('/editor/status', {cache:'no-store'});
+    if (response.status === 404) { editorSession = null; return; }
+    if (!response.ok) throw new Error('Source unavailable');
+    applyEditor(await response.json());
+  } catch (_) {
+    if (editorSession) editorSession.tracking_valid = false;
+  } finally { updateStats(); }
+}
+async function editorCommand(action, extra={}) {
+  const request = {action, request_id:crypto.randomUUID(), revision:editorSession?.revision, ...extra};
+  const response = await fetch('/editor/command', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(request)});
+  const result = await response.json();
+  if (result.editor) applyEditor(result.editor);
+  if (!response.ok || !result.applied) throw new Error(result.message || 'Request failed');
+  return result;
+}
 
 function vec(x=0, y=0, z=0) { return {x:Number(x), y:Number(y), z:Number(z)}; }
 function add(a,b) { return vec(a.x+b.x, a.y+b.y, a.z+b.z); }
@@ -259,7 +299,7 @@ function profileStateText() {
 }
 function nextCalibrationAction() {
   if (!calibration || isCalibrated()) return 'Start a new calibration.';
-  if (!latestRaw) return 'Start Quest streaming. Press B until Quest stream shows Streaming.';
+  if (!latestRaw) return editorSession ? 'Wake the controller and keep it visible to the headset.' : 'Start Quest streaming. Press B until Quest stream shows Streaming.';
   if (!hasRightStart()) return 'Hold the controller at a comfortable start pose, then start collecting right.';
   if (!hasRight()) return 'Move the controller to your physical right, hold still, then finish right.';
   if (!hasForwardStart()) return 'Hold the controller at a comfortable start pose, then start collecting forward.';
@@ -267,7 +307,9 @@ function nextCalibrationAction() {
   return 'Hold the controller at the neutral teleop pose, then set origin.';
 }
 function updateToolSummary() {
-  streamMetric.textContent = gateOpen ? 'Streaming' : (pauseState ? `Paused (${pauseState})` : 'Waiting');
+  streamMetric.textContent = editorSession
+    ? (editorSession.active ? (editorSession.tracking_valid ? 'Live' : 'Waiting') : 'Idle')
+    : (gateOpen ? 'Streaming' : (pauseState ? `Paused (${pauseState})` : 'Waiting'));
   profileMetric.textContent = profileStateText();
 }
 function saveServerCalibration() {
@@ -279,6 +321,12 @@ function saveServerCalibration() {
   calibration.profile = currentProfile;
   calibration.savedAt = new Date().toISOString();
   localSaveCalibration();
+  if (editorSession) {
+    return editorCommand('finish', {profile:currentProfile, calibration}).then(result => {
+      profileStatus.textContent = result.message;
+      return loadProfiles().then(() => true);
+    }).catch(err => { profileStatus.textContent = err.message; return false; });
+  }
   return fetch(`/calibration?profile=${encodeURIComponent(currentProfile)}`, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -435,6 +483,19 @@ function updateCalibrationStatus(message=null) {
   else if (hasForwardStart() && !hasForward()) nextActionEl.textContent = `${nextCalibrationAction()} Current movement: ${forwardMotionText}.`;
   else if (hasRightStart() && !hasRight()) nextActionEl.textContent = `${nextCalibrationAction()} Current movement: ${rightMotionText}.`;
   else nextActionEl.textContent = nextCalibrationAction();
+  if (editorSession) {
+    saveProfileBtn.textContent = 'Finish Calibration';
+    saveProfileBtn.disabled = commandPending || !editorSession.active || !isCalibrated();
+    calibNextBtn.disabled = commandPending || (editorSession.active && calibration
+      && !isCalibrated() && (!latestRaw || !editorSession.tracking_valid));
+    if (!editorSession.active) {
+      calibNextBtn.textContent = 'Start new calibration';
+      nextActionEl.textContent = editorSession.state === 'awaiting_b'
+        ? 'Calibration finished. Return to your controls and pause/resume B.'
+        : 'Editor idle. Start a new calibration when needed.';
+    }
+  }
+  if (editorSession === undefined) { calibNextBtn.disabled = true; saveProfileBtn.disabled = true; }
 }
 function updateStats() {
   dot.classList.toggle('on', gateOpen);
@@ -445,12 +506,14 @@ function updateStats() {
   updateToolSummary();
 }
 function handleEvent(ev) {
+  if (ev.type === 'editor') { applyEditor(ev.editor); return; }
   if (ev.type === 'snapshot') {
     rawPoints = (ev.points || []).map(clonePoint);
     gateOpen = !!ev.gate_open; pauseState = ev.pause_state;
   } else if (ev.type === 'reset') {
     rawPoints = [];
   } else if (ev.type === 'pose') {
+    if (editorSession && !editorSession.active) return;
     rawPoints.push(clonePoint(ev.point));
   } else if (ev.type === 'status') {
     gateOpen = !!ev.gate_open; pauseState = ev.pause_state;
@@ -458,6 +521,10 @@ function handleEvent(ev) {
   refreshDisplayPoints(); updateStats(); draw();
 }
 function requireLatest() {
+  if (editorSession && (!editorSession.active || !editorSession.tracking_valid
+      || !latestRaw || Date.now()/1000 - latestRaw.recv_unix > .5)) {
+    updateCalibrationStatus('Controller unavailable. Restore tracking before capturing.'); return null;
+  }
   if (!latestRaw) { updateCalibrationStatus('No controller sample yet. Start streaming first.'); return null; }
   return rawVec(latestRaw);
 }
@@ -516,15 +583,24 @@ function saveOrigin() {
   calibration.state = 'ready';
   calibration.completedAt = new Date().toISOString();
   localSaveCalibration(); refreshDisplayPoints(); updateStats(); draw();
-  saveServerCalibration();
+  if (!editorSession) saveServerCalibration();
 }
-calibNextBtn.onclick = () => {
-  if (!calibration || isCalibrated()) beginNewCalibration();
-  else if (!hasRightStart()) startRightCollection();
-  else if (!hasRight()) saveRightDirection();
-  else if (!hasForwardStart()) startForwardSample();
-  else if (!hasForward()) saveForwardDirection();
-  else if (!hasOrigin()) saveOrigin();
+calibNextBtn.onclick = async () => {
+  commandPending = true;
+  try {
+    if (editorSession && !editorSession.active) await editorCommand('begin');
+    if (!calibration || isCalibrated()) beginNewCalibration();
+    else if (!hasRightStart()) startRightCollection();
+    else if (!hasRight()) saveRightDirection();
+    else if (!hasForwardStart()) startForwardSample();
+    else if (!hasForward()) saveForwardDirection();
+    else if (!hasOrigin()) saveOrigin();
+  } catch (error) { profileStatus.textContent = error.message; }
+  finally { commandPending = false; updateStats(); }
+};
+cancelCalibrationBtn.onclick = async () => {
+  try { await editorCommand('cancel'); }
+  catch (error) { profileStatus.textContent = error.message; }
 };
 document.getElementById('clear').onclick = () => { rawPoints = []; refreshDisplayPoints(); updateStats(); draw(); };
 document.getElementById('fit').onclick = () => { zoom = 1; draw(); };
@@ -543,7 +619,11 @@ profileSelect.addEventListener('change', () => {
   }
 });
 loadProfileBtn.onclick = () => loadServerCalibration(profileNameInput.value);
-saveProfileBtn.onclick = () => saveServerCalibration();
+saveProfileBtn.onclick = async () => {
+  commandPending = true; updateStats();
+  try { await saveServerCalibration(); }
+  finally { commandPending = false; updateStats(); }
+};
 canvas.addEventListener('mousedown', e => { dragging = true; dragStart = {x:e.clientX, y:e.clientY, az, el}; });
 window.addEventListener('mouseup', () => dragging = false);
 window.addEventListener('mousemove', e => {
@@ -557,7 +637,7 @@ function loadProfiles() {
   return fetch('/calibrations').then(r => r.json()).then(info => {
     const activeProfile = sanitizeProfileName(info.active || currentProfile);
     if (!profileInitialized) {
-      currentProfile = activeProfile;
+      currentProfile = sanitizeProfileName(new URLSearchParams(location.search).get('profile') || activeProfile);
       profileInitialized = true;
     } else {
       currentProfile = sanitizeProfileName(currentProfile || activeProfile);
@@ -594,7 +674,8 @@ function loadServerCalibration(profile=currentProfile) {
     applyCalibration(local, currentProfile, local ? `Loaded local draft after server error: ${currentProfile}` : `Load failed: ${err.message}`);
   });
 }
-loadProfiles().then(() => loadServerCalibration(currentProfile));
+refreshEditor().then(() => loadProfiles()).then(() => loadServerCalibration(currentProfile));
+setInterval(refreshEditor, 1000);
 fetch('/snapshot').then(r => r.json()).then(handleEvent).catch(() => {});
 const es = new EventSource('/events');
 es.onmessage = e => handleEvent(JSON.parse(e.data));
@@ -610,8 +691,13 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
-def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPRequestHandler]:
-    calibration_dir = calibration_path.parent
+def make_handler(
+    state: LiveState,
+    calibration_path: Path,
+    *,
+    editor: CalibrationSession | None = None,
+) -> type[BaseHTTPRequestHandler]:
+    calibration_dir = editor.storage_dir if editor else calibration_path.parent
     default_profile = calibration_path.stem
 
     class Handler(BaseHTTPRequestHandler):
@@ -635,6 +721,9 @@ def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPReque
 
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
+            if path == "/editor/status" and editor is not None:
+                self.send_text(json.dumps(editor.snapshot()), "application/json")
+                return
             if path == "/":
                 self.send_text(HTML, "text/html; charset=utf-8")
                 return
@@ -663,7 +752,11 @@ def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPReque
                     )
                 self.send_text(
                     json.dumps(
-                        {"active": default_profile, "profiles": profiles}, separators=(",", ":")
+                        {
+                            "active": editor.path.stem if editor else default_profile,
+                            "profiles": profiles,
+                        },
+                        separators=(",", ":"),
                     ),
                     "application/json",
                 )
@@ -671,6 +764,8 @@ def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPReque
             if path == "/calibration":
                 try:
                     selected = self.selected_calibration_path()
+                    if editor and not selected.exists() and selected.stem == editor.path.stem:
+                        selected = editor.path
                     if selected.exists():
                         self.send_text(selected.read_text(encoding="utf-8"), "application/json")
                     else:
@@ -705,6 +800,35 @@ def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPReque
 
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
+            if editor is not None:
+                if path != "/editor/command":
+                    self.send_text(
+                        "Use Finish Calibration to save and apply a profile",
+                        "text/plain",
+                        HTTPStatus.CONFLICT,
+                    )
+                    return
+                try:
+                    origin = self.headers.get("Origin")
+                    if origin and urlparse(origin).netloc != self.headers.get("Host"):
+                        raise ValueError("Cross-origin writes are not allowed")
+                    if self.headers.get_content_type() != "application/json":
+                        raise ValueError("application/json required")
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < length <= 65536:
+                        raise ValueError("Invalid request size")
+                    request = json.loads(self.rfile.read(length).decode("utf-8"))
+                    if not isinstance(request, dict):
+                        raise ValueError("Expected an object")
+                    result = editor.submit(request)
+                except (OSError, ValueError) as exc:
+                    result = {"accepted": False, "applied": False, "message": str(exc)}
+                self.send_text(
+                    json.dumps(result),
+                    "application/json",
+                    HTTPStatus.OK if result.get("applied") else HTTPStatus.CONFLICT,
+                )
+                return
             if path != "/calibration":
                 self.send_text("Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)
                 return
@@ -729,6 +853,13 @@ def make_handler(state: LiveState, calibration_path: Path) -> type[BaseHTTPReque
             self.send_text(json.dumps({"ok": True}, separators=(",", ":")), "application/json")
 
         def do_DELETE(self) -> None:  # noqa: N802
+            if editor is not None:
+                self.send_text(
+                    "Profile deletion is disabled during a live source session",
+                    "text/plain",
+                    HTTPStatus.CONFLICT,
+                )
+                return
             path = urlparse(self.path).path
             if path != "/calibration":
                 self.send_text("Not found", "text/plain; charset=utf-8", HTTPStatus.NOT_FOUND)

@@ -12,12 +12,14 @@ import sys
 import tempfile
 import time
 import uuid
+import webbrowser
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from .device_cli import status_payload as device_status_payload
 
@@ -130,6 +132,33 @@ def _utc_now() -> str:
 
 def start(args: argparse.Namespace) -> int:
     port = int(os.environ.get("CALIBRATION_WEB_PORT", DEFAULT_PORT))
+    # A running source owns both the raw input and its persistent editor. Reuse
+    # that editor instead of launching another raw receiver on the same ports.
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        with urlopen(url + "editor/status", timeout=0.5) as response:
+            editor = json.load(response)
+    except (OSError, ValueError):
+        editor = None
+    if isinstance(editor, dict) and editor.get("schema_version") == "quest.calibration_editor/v1":
+        request = Request(
+            url + "editor/command",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps({"action": "begin", "request_id": str(uuid.uuid4())}).encode(),
+        )
+        try:
+            with urlopen(request, timeout=3) as response:
+                result = json.load(response)
+            if not result.get("applied"):
+                raise ValueError(result.get("message", "Source did not accept calibration"))
+        except (OSError, ValueError) as exc:
+            print(f"START FAILED: {exc}")
+            return 1
+        url += "?" + urlencode({"profile": args.profile})
+        webbrowser.open(url)
+        print(f"READY source-owned editor; saving as profile={args.profile}\nURL {url}")
+        return 0
     command = [
         sys.executable,
         "-m",
@@ -192,6 +221,25 @@ def status(args: argparse.Namespace) -> int:
     state = _read_state()
     if state is None or not _managed(state):
         payload = {"schema_version": STATE_SCHEMA, "state": "stopped", "running": False}
+        url = f"http://127.0.0.1:{int(os.environ.get('CALIBRATION_WEB_PORT', DEFAULT_PORT))}/"
+        try:
+            with urlopen(url + "editor/status", timeout=args.probe_timeout) as response:
+                editor = json.load(response)
+            if editor.get("schema_version") == "quest.calibration_editor/v1":
+                payload.update(
+                    {
+                        "running": True,
+                        "state": "ready",
+                        "owner": "source",
+                        "pid": None,
+                        "service_url": url,
+                        "calibration_ready": True,
+                        "profile": editor["profile"],
+                        "editor": editor,
+                    }
+                )
+        except (OSError, ValueError, AttributeError):
+            pass
     else:
         page_ready = _ready(state["service_url"], args.probe_timeout)
         try:

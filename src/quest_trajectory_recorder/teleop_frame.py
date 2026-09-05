@@ -50,9 +50,14 @@ def load_quest_calibration(path: Path | None) -> QuestCalibration | None:
     if path is None or not path.exists():
         return None
     data = json.loads(path.read_text())
+    return calibration_from_dict(data)
+
+
+def calibration_from_dict(data: dict[str, Any]) -> QuestCalibration:
+    """Validate and normalize a profile before committing it to live input."""
     health = calibration_health(data)
     if not health["valid"]:
-        raise ValueError(f"Invalid calibration file {path}: {'; '.join(health['issues'])}")
+        raise ValueError(f"Invalid calibration: {'; '.join(health['issues'])}")
     try:
         return QuestCalibration(
             origin=[float(data["origin"][key]) for key in ("x", "y", "z")],
@@ -61,7 +66,7 @@ def load_quest_calibration(path: Path | None) -> QuestCalibration | None:
             up=_norm([data["up"][key] for key in ("x", "y", "z")]),
         )
     except KeyError as exc:
-        raise ValueError(f"Invalid calibration file {path}: missing {exc}") from exc
+        raise ValueError(f"Invalid calibration: missing {exc}") from exc
 
 
 def quest_pos_to_teleop(pos: Any, calibration: QuestCalibration | None) -> list[float]:

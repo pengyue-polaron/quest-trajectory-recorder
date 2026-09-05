@@ -1,44 +1,46 @@
 # Quest Trajectory Recorder
 
-## Tracking-frame confirmation
-
-The recovered APK does not provide a native reference-space epoch. On every
-source startup, confirm directions with `quest-align start`, move right at least
-15 cm, `quest-align finish`, return to neutral, `quest-align forward`, move
-forward at least 15 cm, then `quest-align finish`. Pause B and press B again to
-enable the stream. `just alignment-status` is a read-only readiness check.
-
-This quick correction is session-local: it does not overwrite the named profile.
-Targets include `source_metadata.calibration_valid` and an `alignment` object
-containing the state, reason, revision, observed tracking-frame evidence, and
-effective calibration axes. Original profile identity describes the loaded file,
-not a claim that the effective transform is unchanged.
-
-The source watches ADB boot/process identity and existing Recenter/Relocalization
-logs off the ingest thread. A detected change, or 15 seconds without verifiable
-frame evidence, invalidates confirmation and closes the stream gate. Alignment
-also rejects stale tracking, short strokes and inconsistent directions. Ordinary
-B pauses and controller tracking losses do not invalidate completed alignment.
-No reconnect path restarts the APK.
-
-The local ZMQ REP endpoint is `tcp://127.0.0.1:8133` (hub `--alignment-bind`). JSON
-requests contain `request_id`, `revision` and `action` (`status`, `start`, `finish`,
-`forward`). Responses contain `accepted`, `applied`, `message` and `alignment`.
-Mutations require the current revision; retries with the same ID are idempotent.
-Keep this unauthenticated endpoint on a trusted host/network.
-
-Detection is best effort, not a hardware safety guarantee: logs may be delayed
-or unavailable, and physically changing your facing direction cannot be inferred
-from a controller pose. Request Align whenever directions feel wrong. Guaranteed
-cross-session spatial continuity requires a future APK with explicit frame-change
-events or persistent spatial anchors.
-
 An input-device adapter for the controller-tracking Quest APK. Its maintained
 runtime boundary is deliberately small:
 
 ```text
 Quest APK raw ports -> parser -> named calibration -> TeleopTarget ZMQ PUB
 ```
+
+## Persistent calibration editor
+
+The source is the only raw-input owner. While `just source <profile>` is running,
+its editor remains available at `http://127.0.0.1:8766/`. `just calibrate <profile>`
+reuses this editor when present, without starting a second receiver. Without a
+running source it starts the standalone, page-first editor as before.
+
+1. **Start new calibration** closes the published gate and sets
+   `source_metadata.calibration_valid=false`. Only the editor receives live poses.
+2. Collect right, finish; collect forward, finish; then set origin.
+3. **Finish Calibration** validates and atomically saves the named profile, then
+   applies it to the running source. The page stays open but stops pose updates.
+4. Pause B, then resume B. New targets use the saved transform. **Cancel** retains
+   the previous profile and also requires B before resuming.
+
+The source keeps publishing status and gated targets throughout; subscribers
+must honor the gate and calibration validity. Revisions change at mode boundaries
+so consumers can re-anchor even if they miss the invalidation packet. Metadata
+includes `calibration_editor`, `calibration_revision`, `effective_calibration`, and
+the actual saved file's `calibration_sha256`. There is no separate Align workflow
+or automatic invalidation based on ADB log availability. The recovered APK cannot
+guarantee persistent coordinates across recentering/relocalization: recalibrate
+in this same editor when directions are wrong. Reconnect never restarts the APK.
+
+Source configuration uses local ZMQ REP `tcp://127.0.0.1:8133`
+(`--source-control-bind`) or `POST /editor/command`. Requests contain `request_id`
+and `action` (`status`, `begin`, `finish`, `cancel`). Finish/cancel also require
+the current `revision`; finish includes `profile` and the complete `calibration`.
+Responses include `accepted`, `applied`, `message`, and `editor`. Begin is
+idempotent; old-session saves are rejected; repeated IDs replay their result.
+`GET /editor/status` is read-only. Keep both endpoints on a trusted host; they
+are not authenticated. `--web-host` and `--web-port` configure the editor.
+`just status-json` reports a running source-owned editor separately from raw
+tracking availability. Stopping the standalone editor never stops a live source.
 
 This repository does not know which simulator, robot, recorder, or UI consumes
 the stream. It does not subscribe to backend feedback, send robot commands, or

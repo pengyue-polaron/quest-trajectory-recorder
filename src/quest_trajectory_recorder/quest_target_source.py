@@ -8,7 +8,7 @@ from dataclasses import replace
 
 import zmq
 
-from .alignment import Alignment
+from .calibration_session import CalibrationSession
 from .receiver import parse_remote_text
 from .teleop_frame import QuestCalibration
 from .teleop_target import TeleopTarget, target_from_remote, valid_remote
@@ -43,14 +43,14 @@ class DirectQuestTargetSource:
         calibration_id: str | None = None,
         calibration_sha256: str | None = None,
         tracking_loss_grace_ms: float = 120.0,
-        alignment: Alignment | None = None,
+        editor: CalibrationSession | None = None,
     ) -> None:
         if not math.isfinite(tracking_loss_grace_ms) or tracking_loss_grace_ms < 0:
             raise ValueError("tracking_loss_grace_ms must be finite and non-negative")
         if not math.isfinite(initial_gripper) or not -1.0 <= initial_gripper <= 1.0:
             raise ValueError("initial_gripper must be within [-1, 1]")
         self.context = context
-        self.alignment = alignment
+        self.editor = editor
         self.calibration = calibration
         self.no_gate = no_gate
         self.trajectory_gate_pause = trajectory_gate_pause
@@ -112,8 +112,8 @@ class DirectQuestTargetSource:
         if state not in {"High", "Low"}:
             return
         self.pause_state = state
-        if self.alignment is not None:
-            self.alignment.pause(state != self.trajectory_gate_pause)
+        if self.editor is not None:
+            self.editor.pause(state != self.trajectory_gate_pause)
         was_open = self.gate_open
         if self.no_gate or state == self.trajectory_gate_pause and self.gate_armed:
             next_gate_open = True
@@ -131,7 +131,7 @@ class DirectQuestTargetSource:
             )
             self.initial_high_warned = True
         self.gate_open = next_gate_open
-        if self.alignment is not None and not self.alignment.enabled:
+        if self.editor is not None and not self.editor.enabled:
             self.gate_open = False
         if self.gate_open and not was_open:
             self.events.append("Teleop clutch engaged.")
@@ -174,8 +174,8 @@ class DirectQuestTargetSource:
                 # same way, while the backend's stale-target watchdog remains
                 # the final safety bound.
                 return None
-            if self.alignment is not None:
-                self.alignment.sample(None, received_monotonic_ns / 1e9)
+            if self.editor is not None:
+                self.editor.observe(None, self.raw_remote_count, received_monotonic_ns / 1e9)
             if self.latest_raw_valid is True:
                 self.tracking_loss_count += 1
                 self.events.append("Controller tracking lost; publishing an immediate safety hold.")
@@ -212,10 +212,12 @@ class DirectQuestTargetSource:
             self.latest_target = invalid
             return invalid
         recovered = self.latest_raw_valid is False and self.remote_count > 0
-        if self.alignment is not None:
-            self.alignment.sample(list(remote["position"]), received_monotonic_ns / 1e9)
-            self.calibration = self.alignment.calibration
-            if not self.alignment.enabled:
+        if self.editor is not None:
+            self.editor.observe(remote, self.raw_remote_count, received_monotonic_ns / 1e9)
+            self.calibration = self.editor.calibration
+            self.calibration_id = self.editor.path.stem
+            self.calibration_sha256 = self.editor.digest
+            if not self.editor.enabled:
                 self.gate_open = False
         self.latest_raw_valid = True
         self.latest_valid_at = time.monotonic()

@@ -30,7 +30,6 @@ quest-synthetic-target = "quest_trajectory_recorder.synthetic_target:main"
 quest-doctor = "quest_trajectory_recorder.device_doctor:main"
 quest-adb = "quest_trajectory_recorder.device_cli:main"
 quest-source = "quest_trajectory_recorder.source_cli:main"
-quest-align = "quest_trajectory_recorder.alignment_cli:main"
 quest-calibration = "quest_trajectory_recorder.calibration_cli:main"
 quest-profile = "quest_trajectory_recorder.profile_cli:main"
 

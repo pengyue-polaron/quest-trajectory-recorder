@@ -1,9 +1,11 @@
 import socket
+from pathlib import Path
 
 import zmq
 
-from quest_trajectory_recorder.alignment import Alignment
+from quest_trajectory_recorder.calibration_session import CalibrationSession
 from quest_trajectory_recorder.quest_target_source import DirectQuestTargetSource
+from quest_trajectory_recorder.teleop_frame import QuestCalibration
 
 VALID = b"absolute|0.1,1.2,0.3|0,0,0,1|False"
 ZERO_PLACEHOLDER = b"absolute|0,0,0|0,0,0,1|False"
@@ -48,20 +50,21 @@ def test_initial_gripper_state_is_configurable_for_held_start_tasks():
         context.term()
 
 
-def test_unconfirmed_frame_blocks_even_no_gate_and_high():
+def test_editor_blocks_even_no_gate_and_high(tmp_path: Path):
     context, source = make_source()
     try:
-        source.alignment = Alignment(None)
+        source.editor = CalibrationSession(tmp_path / "new.json", url="http://localhost/")
+        source.editor.calibration = QuestCalibration([0, 0, 0], [1, 0, 0], [0, 0, 1], [0, 1, 0])
         source._update_pause("High")
         sample = source._update_remote(VALID)
         assert sample.tracking_valid and not sample.gate_open
-        source.alignment.state = "awaiting_b"
+        source.editor.state = "awaiting_b"
         source._update_pause("High")
         assert not source.gate_open
         source._update_pause("Low")
         source._update_pause("High")
         assert source.gate_open
-        source.alignment.invalidate("recenter")
+        source.editor.state = "calibrating"
         sample = source._update_remote(VALID)
         assert not sample.gate_open
     finally:
@@ -69,16 +72,15 @@ def test_unconfirmed_frame_blocks_even_no_gate_and_high():
         context.term()
 
 
-def test_alignment_ignores_isolated_zero_placeholder():
+def test_editor_ignores_isolated_zero_placeholder(tmp_path: Path):
     context, source = make_source()
     try:
-        source.alignment = Alignment(None)
+        source.editor = CalibrationSession(tmp_path / "new.json", url="http://localhost/")
         source._update_remote(VALID, received_monotonic_ns=1_000_000_000)
-        source.alignment.state = "collecting_right"
         source._update_remote(ZERO_PLACEHOLDER, received_monotonic_ns=1_020_000_000)
-        assert source.alignment.state == "collecting_right"
+        assert source.editor.state == "calibrating" and source.editor.live.gate_open
         source._update_remote(ZERO_PLACEHOLDER, received_monotonic_ns=1_150_000_000)
-        assert source.alignment.state == "required"
+        assert source.editor.state == "calibrating" and not source.editor.live.gate_open
     finally:
         source.close()
         context.term()
